@@ -8,30 +8,35 @@
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Firebase SDK -->
   <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
 </head>
 <body>
   <div id="root"></div>
+
   <script type="text/babel">
     const { useState, useEffect } = React;
 
-    const firebaseConfig = {
-      apiKey: "AIzaSyDXswzHsLKCTw5z5K4BWYCoolfogybbnvE",
-      authDomain: "batal-games.firebaseapp.com",
-      projectId: "batal-games",
-      storageBucket: "batal-games.firebasestorage.app",
-      messagingSenderId: "535042272877",
-      appId: "1:535042272877:web:708036abcab58625385964",
-    };
-
     function StockInventoryApp() {
+      // Firebase config baked in here - replace with your own config!
+      const firebaseConfig = {
+        apiKey: "AIzaSyDXswzHsLKCTw5z5K4BWYCoolfogybbnvE",
+        authDomain: "batal-games.firebaseapp.com",
+        projectId: "batal-games",
+        storageBucket: "batal-games.firebasestorage.app",
+        messagingSenderId: "535042272877",
+        appId: "1:535042272877:web:708036abcab58625385964",
+      };
+
+      const [db, setDb] = useState(null);
       const [items, setItems] = useState([]);
       const [packs, setPacks] = useState([]);
       const [isLoading, setIsLoading] = useState(false);
       const [isConnected, setIsConnected] = useState(false);
       const [error, setError] = useState(null);
 
+      // Form states
       const [newItemName, setNewItemName] = useState('');
       const [newItemStock, setNewItemStock] = useState('');
       const [showPackForm, setShowPackForm] = useState(false);
@@ -41,58 +46,58 @@
       const [editName, setEditName] = useState('');
       const [searchQuery, setSearchQuery] = useState('');
 
-      // Custom add/subtract quantities inputs per item and pack (keys are IDs)
+      // Custom quantity inputs for quick add/subtract per item and pack
       const [customAddItem, setCustomAddItem] = useState({});
       const [customSubtractItem, setCustomSubtractItem] = useState({});
       const [customAddPack, setCustomAddPack] = useState({});
       const [customSubtractPack, setCustomSubtractPack] = useState({});
 
-      let db = null;
-
-      // Initialize Firebase and Firestore
-      const initializeFirebase = () => {
+      // Initialize Firebase Firestore once on mount
+      useEffect(() => {
         try {
           if (!firebase.apps.length) {
             firebase.initializeApp(firebaseConfig);
           }
-          db = firebase.firestore();
+          const firestoreDb = firebase.firestore();
+          setDb(firestoreDb);
           setIsConnected(true);
           setError(null);
-          loadData();
-          return true;
-        } catch (error) {
-          setError(`Firebase initialization failed: ${error.message}`);
+        } catch (e) {
+          setError(`Firebase init error: ${e.message}`);
           setIsConnected(false);
-          return false;
         }
-      };
+      }, []);
 
-      // Load data from Firestore
-      const loadData = async () => {
+      // Load data when db is ready
+      useEffect(() => {
         if (!db) return;
+        loadData();
+      }, [db]);
+
+      const loadData = async () => {
         setIsLoading(true);
         try {
           const itemsSnapshot = await db.collection('items').get();
           const itemsData = [];
-          itemsSnapshot.forEach(doc => itemsData.push({ id: doc.id, ...doc.data() }));
+          itemsSnapshot.forEach(doc => {
+            itemsData.push({ id: doc.id, ...doc.data() });
+          });
           setItems(itemsData);
 
           const packsSnapshot = await db.collection('packs').get();
           const packsData = [];
-          packsSnapshot.forEach(doc => packsData.push({ id: doc.id, ...doc.data() }));
+          packsSnapshot.forEach(doc => {
+            packsData.push({ id: doc.id, ...doc.data() });
+          });
           setPacks(packsData);
 
           setError(null);
-        } catch (error) {
-          setError(`Failed to load data: ${error.message}`);
+        } catch (e) {
+          setError(`Failed to load data: ${e.message}`);
         } finally {
           setIsLoading(false);
         }
       };
-
-      useEffect(() => {
-        initializeFirebase();
-      }, []);
 
       // Add new item
       const addItem = async () => {
@@ -103,42 +108,36 @@
             stock: parseInt(newItemStock) || 0,
             createdAt: firebase.firestore.FieldValue.serverTimestamp(),
           });
-          const newItem = {
-            id: docRef.id,
-            name: newItemName.trim(),
-            stock: parseInt(newItemStock) || 0,
-          };
-          setItems(prev => [...prev, newItem]);
+          setItems(prev => [...prev, { id: docRef.id, name: newItemName.trim(), stock: parseInt(newItemStock) || 0 }]);
           setNewItemName('');
           setNewItemStock('');
-        } catch (error) {
-          setError(`Failed to add item: ${error.message}`);
+        } catch (e) {
+          setError(`Failed to add item: ${e.message}`);
         }
       };
 
-      // Update stock for an item by a given amount (+/-)
+      // Update item stock by + or - 1 or custom number
       const updateStock = async (id, change) => {
+        if (!db) return;
         const item = items.find(i => i.id === id);
-        if (!item || !db) return;
+        if (!item) return;
         const newStock = Math.max(0, item.stock + change);
         try {
           await db.collection('items').doc(id).update({
             stock: newStock,
             updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
           });
-          setItems(prev =>
-            prev.map(i => (i.id === id ? { ...i, stock: newStock } : i))
-          );
-          // Clear custom inputs for this item
+          setItems(prev => prev.map(i => i.id === id ? { ...i, stock: newStock } : i));
           setCustomAddItem(prev => ({ ...prev, [id]: '' }));
           setCustomSubtractItem(prev => ({ ...prev, [id]: '' }));
-        } catch (error) {
-          setError(`Failed to update stock: ${error.message}`);
+        } catch (e) {
+          setError(`Failed to update stock: ${e.message}`);
         }
       };
 
-      // Delete item, check if used in packs
+      // Delete item (only if not used in packs)
       const deleteItem = async (id) => {
+        if (!db) return;
         const usedInPacks = packs.filter(pack =>
           pack.components && pack.components.some(c => c.itemId === id)
         );
@@ -148,46 +147,49 @@
         }
         try {
           await db.collection('items').doc(id).delete();
-          setItems(prev => prev.filter(item => item.id !== id));
-        } catch (error) {
-          setError(`Failed to delete item: ${error.message}`);
+          setItems(prev => prev.filter(i => i.id !== id));
+        } catch (e) {
+          setError(`Failed to delete item: ${e.message}`);
         }
       };
 
-      // Edit item name save
+      // Edit item name
       const saveEdit = async () => {
-        if (!editName.trim() || !db) return;
+        if (!editName.trim() || !db || !editingId) return;
         try {
           await db.collection('items').doc(editingId).update({
             name: editName.trim(),
             updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
           });
-          setItems(prev =>
-            prev.map(item =>
-              item.id === editingId ? { ...item, name: editName.trim() } : item
-            )
-          );
+          setItems(prev => prev.map(i => i.id === editingId ? { ...i, name: editName.trim() } : i));
           setEditingId(null);
           setEditName('');
-        } catch (error) {
-          setError(`Failed to update item: ${error.message}`);
+        } catch (e) {
+          setError(`Failed to update item: ${e.message}`);
         }
       };
 
       // Pack management
-
       const addComponentToPack = (itemId) => {
         const item = items.find(i => i.id === itemId);
         if (!item) return;
-        const existing = packComponents.find(c => c.itemId === itemId);
-        if (existing) {
-          setPackComponents(prev =>
-            prev.map(c =>
-              c.itemId === itemId ? { ...c, quantity: c.quantity + 1 } : c
-            )
-          );
+        const exists = packComponents.find(c => c.itemId === itemId);
+        if (exists) {
+          setPackComponents(prev => prev.map(c => c.itemId === itemId ? { ...c, quantity: c.quantity + 1 } : c));
         } else {
           setPackComponents(prev => [...prev, { itemId, name: item.name, quantity: 1 }]);
+        }
+      };
+
+      const removeComponentFromPack = (itemId) => {
+        setPackComponents(prev => prev.filter(c => c.itemId !== itemId));
+      };
+
+      const updateComponentQuantity = (itemId, qty) => {
+        if (qty <= 0) {
+          removeComponentFromPack(itemId);
+        } else {
+          setPackComponents(prev => prev.map(c => c.itemId === itemId ? { ...c, quantity: qty } : c));
         }
       };
 
@@ -199,88 +201,87 @@
             components: packComponents,
             createdAt: firebase.firestore.FieldValue.serverTimestamp(),
           });
-          const newPack = {
-            id: docRef.id,
-            name: newPackName.trim(),
-            components: [...packComponents],
-          };
-          setPacks(prev => [...prev, newPack]);
+          setPacks(prev => [...prev, { id: docRef.id, name: newPackName.trim(), components: [...packComponents] }]);
           setNewPackName('');
           setPackComponents([]);
           setShowPackForm(false);
-        } catch (error) {
-          setError(`Failed to create pack: ${error.message}`);
+        } catch (e) {
+          setError(`Failed to create pack: ${e.message}`);
         }
       };
 
       const deletePack = async (id) => {
+        if (!db) return;
         try {
           await db.collection('packs').doc(id).delete();
-          setPacks(prev => prev.filter(pack => pack.id !== id));
-        } catch (error) {
-          setError(`Failed to delete pack: ${error.message}`);
+          setPacks(prev => prev.filter(p => p.id !== id));
+        } catch (e) {
+          setError(`Failed to delete pack: ${e.message}`);
         }
       };
 
-      const removeComponentFromPack = (itemId) => {
-        setPackComponents(prev => prev.filter(c => c.itemId !== itemId));
-      };
-
-      const updateComponentQuantity = (itemId, newQuantity) => {
-        if (newQuantity <= 0) {
-          removeComponentFromPack(itemId);
-        } else {
-          setPackComponents(prev =>
-            prev.map(c =>
-              c.itemId === itemId ? { ...c, quantity: newQuantity } : c
-            )
-          );
-        }
-      };
-
-      // Calculate how many packs are available based on components stock
+      // Get minimum packs available based on component stock
       const getPackAvailability = (pack) => {
         if (!pack.components || pack.components.length === 0) return 0;
         let minAvailable = Infinity;
-        for (const component of pack.components) {
-          const item = items.find(i => i.id === component.itemId);
+        for (const c of pack.components) {
+          const item = items.find(i => i.id === c.itemId);
           if (!item) return 0;
-          const available = Math.floor(item.stock / component.quantity);
-          minAvailable = Math.min(minAvailable, available);
+          const avail = Math.floor(item.stock / c.quantity);
+          minAvailable = Math.min(minAvailable, avail);
         }
         return minAvailable === Infinity ? 0 : minAvailable;
       };
 
-      // Update pack stock by change (positive or negative)
+      // Update pack stock by change (+ or -)
       const updatePackStock = async (packId, change) => {
+        if (!db) return;
         const pack = packs.find(p => p.id === packId);
-        if (!pack || !pack.components) return;
+        if (!pack) return;
 
         if (change < 0) {
-          const available = getPackAvailability(pack);
-          if (available < Math.abs(change)) {
-            alert(`Not enough components! Only ${available} packs available.`);
+          const avail = getPackAvailability(pack);
+          if (avail < Math.abs(change)) {
+            alert(`Not enough components! Only ${avail} packs available.`);
             return;
           }
         }
 
-        // Update component stocks accordingly
-        const promises = pack.components.map(component => {
-          const newChange = -(component.quantity * change);
-          return updateStock(component.itemId, newChange);
-        });
-
         try {
-          await Promise.all(promises);
-          // Clear custom inputs for this pack
-          setCustomAddPack(prev => ({ ...prev, [packId]: '' }));
-          setCustomSubtractPack(prev => ({ ...prev, [packId]: '' }));
-        } catch (error) {
-          setError(`Failed to update pack stock: ${error.message}`);
+          // Update all components stock
+          await Promise.all(pack.components.map(c => {
+            const changeAmount = -(c.quantity * change);
+            return updateStock(c.itemId, changeAmount);
+          }));
+        } catch (e) {
+          setError(`Failed to update pack stock: ${e.message}`);
         }
       };
 
-      // Start and cancel editing for item names
+      // Quick + / - handlers for custom input changes
+      const handleCustomAddItem = (id) => {
+        const val = parseInt(customAddItem[id]);
+        if (!val || val <= 0) return;
+        updateStock(id, val);
+      };
+      const handleCustomSubtractItem = (id) => {
+        const val = parseInt(customSubtractItem[id]);
+        if (!val || val <= 0) return;
+        updateStock(id, -val);
+      };
+
+      const handleCustomAddPack = (id) => {
+        const val = parseInt(customAddPack[id]);
+        if (!val || val <= 0) return;
+        updatePackStock(id, val);
+      };
+      const handleCustomSubtractPack = (id) => {
+        const val = parseInt(customSubtractPack[id]);
+        if (!val || val <= 0) return;
+        updatePackStock(id, -val);
+      };
+
+      // Edit controls for items
       const startEdit = (item) => {
         setEditingId(item.id);
         setEditName(item.name);
@@ -290,7 +291,14 @@
         setEditName('');
       };
 
-      // Export data as JSON file
+      // Filtered items by search
+      const filteredItems = items.filter(i => i.name.toLowerCase().includes(searchQuery.toLowerCase()));
+
+      // Totals
+      const totalStock = items.reduce((sum, i) => sum + i.stock, 0);
+      const totalPacksAvailable = packs.reduce((sum, p) => sum + getPackAvailability(p), 0);
+
+      // Export data JSON
       const exportData = () => {
         const data = { items, packs };
         const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -301,15 +309,6 @@
         link.click();
         URL.revokeObjectURL(url);
       };
-
-      // Filter items by search query
-      const filteredItems = items.filter(item =>
-        item.name.toLowerCase().includes(searchQuery.toLowerCase())
-      );
-
-      // Totals
-      const totalStock = items.reduce((sum, item) => sum + item.stock, 0);
-      const totalPacksAvailable = packs.reduce((sum, pack) => sum + getPackAvailability(pack), 0);
 
       return (
         <div className="min-h-screen bg-gray-50 p-4">
@@ -373,7 +372,7 @@
                     value={newItemName}
                     onChange={(e) => setNewItemName(e.target.value)}
                     className="flex-1 px-3 py-2 border rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                    onKeyPress={(e) => e.key === 'Enter' && addItem()}
+                    onKeyPress={e => e.key === 'Enter' && addItem()}
                   />
                   <input
                     type="number"
@@ -381,7 +380,7 @@
                     value={newItemStock}
                     onChange={(e) => setNewItemStock(e.target.value)}
                     className="w-32 px-3 py-2 border rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                    onKeyPress={(e) => e.key === 'Enter' && addItem()}
+                    onKeyPress={e => e.key === 'Enter' && addItem()}
                   />
                   <button
                     onClick={addItem}
@@ -402,73 +401,66 @@
                   <button
                     onClick={() => setShowPackForm(!showPackForm)}
                     disabled={!isConnected}
-                    className="px-3 py-1 bg-purple-600 text-white rounded-md hover:bg-purple-700 transition-colors"
+                    className="px-3 py-1 bg-purple-600 text-white rounded-md hover:bg-purple-700 disabled:bg-gray-300 transition-colors"
                   >
-                    {showPackForm ? 'Close' : 'Create'}
+                    {showPackForm ? 'Cancel' : 'Create Pack'}
                   </button>
                 </div>
                 {showPackForm && (
-                  <div>
+                  <div className="space-y-4">
                     <input
                       type="text"
                       placeholder="Pack name"
                       value={newPackName}
                       onChange={(e) => setNewPackName(e.target.value)}
-                      className="w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-purple-500 focus:outline-none mb-3"
-                      onKeyPress={(e) => {
-                        if (e.key === 'Enter' && packComponents.length > 0) addPack();
-                      }}
+                      className="w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none"
                     />
 
-                    <div className="mb-3">
-                      <p className="font-semibold mb-1">Add products to pack:</p>
-                      <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto border rounded p-2 bg-white">
-                        {items.map(item => (
+                    <div>
+                      <h3 className="font-medium mb-2">Add Components:</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-2 max-h-52 overflow-y-auto">
+                        {filteredItems.map(item => (
                           <button
                             key={item.id}
                             onClick={() => addComponentToPack(item.id)}
-                            className="px-2 py-1 bg-green-100 text-green-800 rounded hover:bg-green-200 transition-colors text-sm"
-                            type="button"
+                            className="p-2 text-left border rounded hover:bg-gray-50 transition-colors"
                           >
-                            {item.name}
+                            {item.name} (Stock: {item.stock})
                           </button>
                         ))}
                       </div>
                     </div>
 
-                    <div className="mb-3">
-                      <p className="font-semibold mb-1">Pack components:</p>
-                      {packComponents.length === 0 && (
-                        <p className="text-sm italic text-gray-500">No components added yet.</p>
-                      )}
-                      {packComponents.map(component => (
-                        <div key={component.itemId} className="flex items-center gap-2 mb-2">
-                          <span className="flex-1">{component.name}</span>
-                          <input
-                            type="number"
-                            min="1"
-                            value={component.quantity}
-                            onChange={(e) =>
-                              updateComponentQuantity(component.itemId, parseInt(e.target.value) || 1)
-                            }
-                            className="w-20 px-2 py-1 border rounded"
-                          />
-                          <button
-                            onClick={() => removeComponentFromPack(component.itemId)}
-                            className="px-2 py-1 text-red-600 hover:text-red-800"
-                            title="Remove component"
-                            type="button"
-                          >
-                            &times;
-                          </button>
-                        </div>
-                      ))}
-                    </div>
+                    {packComponents.length > 0 && (
+                      <div>
+                        <h3 className="font-medium mb-2">Pack Components:</h3>
+                        <ul className="space-y-2">
+                          {packComponents.map(c => (
+                            <li key={c.itemId} className="flex items-center gap-3">
+                              <span className="flex-1">{c.name}</span>
+                              <input
+                                type="number"
+                                min="1"
+                                value={c.quantity}
+                                onChange={(e) => updateComponentQuantity(c.itemId, parseInt(e.target.value) || 1)}
+                                className="w-20 px-2 py-1 border rounded"
+                              />
+                              <button
+                                onClick={() => removeComponentFromPack(c.itemId)}
+                                className="text-red-600 hover:text-red-800 font-semibold"
+                              >
+                                Remove
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
 
                     <button
                       onClick={addPack}
                       disabled={!newPackName.trim() || packComponents.length === 0}
-                      className="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                      className="mt-4 px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 disabled:bg-gray-300 transition-colors"
                     >
                       Save Pack
                     </button>
@@ -477,217 +469,175 @@
               </div>
 
               {/* Search */}
-              <input
-                type="text"
-                placeholder="Search products..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full mb-4 px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
+              <div className="mb-4">
+                <input
+                  type="search"
+                  placeholder="Search products..."
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  className="w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                />
+              </div>
 
-              {/* Items List */}
-              <div className="overflow-x-auto">
-                <table className="w-full border-collapse border border-gray-300 text-sm">
+              {/* Items Table */}
+              <div className="overflow-x-auto mb-10">
+                <table className="w-full text-left border-collapse border border-gray-200">
                   <thead className="bg-gray-100">
                     <tr>
-                      <th className="border border-gray-300 p-2 text-left">Product</th>
-                      <th className="border border-gray-300 p-2 w-24">Stock</th>
-                      <th className="border border-gray-300 p-2 w-48">Quick Edit</th>
-                      <th className="border border-gray-300 p-2 w-56">Custom Qty</th>
-                      <th className="border border-gray-300 p-2 w-20">Actions</th>
+                      <th className="p-2 border border-gray-300">Product</th>
+                      <th className="p-2 border border-gray-300">Stock</th>
+                      <th className="p-2 border border-gray-300">Quick Edit</th>
+                      <th className="p-2 border border-gray-300">Custom Change</th>
+                      <th className="p-2 border border-gray-300">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {isLoading ? (
+                    {filteredItems.length === 0 && (
                       <tr>
-                        <td colSpan="5" className="p-4 text-center text-gray-500">
-                          Loading...
-                        </td>
-                      </tr>
-                    ) : filteredItems.length === 0 ? (
-                      <tr>
-                        <td colSpan="5" className="p-4 text-center text-gray-500">
+                        <td colSpan="5" className="text-center p-4 text-gray-500">
                           No products found.
                         </td>
                       </tr>
-                    ) : (
-                      filteredItems.map(item => (
-                        <tr key={item.id} className="hover:bg-gray-50">
-                          <td className="border border-gray-300 p-2">
-                            {editingId === item.id ? (
-                              <input
-                                type="text"
-                                value={editName}
-                                onChange={e => setEditName(e.target.value)}
-                                className="w-full px-2 py-1 border rounded"
-                              />
-                            ) : (
-                              item.name
-                            )}
-                          </td>
-                          <td className="border border-gray-300 p-2 text-center font-mono">{item.stock}</td>
-                          <td className="border border-gray-300 p-2 text-center space-x-2">
-                            <button
-                              onClick={() => updateStock(item.id, 1)}
-                              disabled={!isConnected}
-                              className="px-3 py-1 bg-green-500 text-white rounded hover:bg-green-600 transition-colors"
-                              title="Add 1"
-                              type="button"
-                            >
-                              +
-                            </button>
-                            <button
-                              onClick={() => updateStock(item.id, -1)}
-                              disabled={!isConnected}
-                              className="px-3 py-1 bg-red-500 text-white rounded hover:bg-red-600 transition-colors"
-                              title="Subtract 1"
-                              type="button"
-                            >
-                              -
-                            </button>
-                          </td>
-                          <td className="border border-gray-300 p-2 text-center flex items-center gap-2 justify-center">
-                            <input
-                              type="number"
-                              min="1"
-                              placeholder="+"
-                              value={customAddItem[item.id] || ''}
-                              onChange={e => setCustomAddItem(prev => ({ ...prev, [item.id]: e.target.value }))}
-                              className="w-16 px-2 py-1 border rounded"
-                            />
-                            <button
-                              onClick={() => {
-                                const val = parseInt(customAddItem[item.id]);
-                                if (val > 0) updateStock(item.id, val);
-                              }}
-                              disabled={!isConnected || !(parseInt(customAddItem[item.id]) > 0)}
-                              className="px-3 py-1 bg-green-600 text-white rounded hover:bg-green-700 transition-colors"
-                              type="button"
-                              title="Add custom quantity"
-                            >
-                              +
-                            </button>
-                            <input
-                              type="number"
-                              min="1"
-                              placeholder="-"
-                              value={customSubtractItem[item.id] || ''}
-                              onChange={e => setCustomSubtractItem(prev => ({ ...prev, [item.id]: e.target.value }))}
-                              className="w-16 px-2 py-1 border rounded"
-                            />
-                            <button
-                              onClick={() => {
-                                const val = parseInt(customSubtractItem[item.id]);
-                                if (val > 0) updateStock(item.id, -val);
-                              }}
-                              disabled={!isConnected || !(parseInt(customSubtractItem[item.id]) > 0)}
-                              className="px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
-                              type="button"
-                              title="Subtract custom quantity"
-                            >
-                              -
-                            </button>
-                          </td>
-                          <td className="border border-gray-300 p-2 text-center space-x-1">
-                            {editingId === item.id ? (
-                              <>
-                                <button
-                                  onClick={saveEdit}
-                                  disabled={!editName.trim() || !isConnected}
-                                  className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
-                                  type="button"
-                                >
-                                  Save
-                                </button>
-                                <button
-                                  onClick={cancelEdit}
-                                  className="px-3 py-1 bg-gray-300 rounded hover:bg-gray-400 transition-colors"
-                                  type="button"
-                                >
-                                  Cancel
-                                </button>
-                              </>
-                            ) : (
-                              <>
-                                <button
-                                  onClick={() => startEdit(item)}
-                                  className="px-3 py-1 bg-yellow-400 rounded hover:bg-yellow-500 transition-colors"
-                                  type="button"
-                                  title="Edit name"
-                                >
-                                  ✎
-                                </button>
-                                <button
-                                  onClick={() => {
-                                    if (window.confirm(`Delete product "${item.name}"?`)) deleteItem(item.id);
-                                  }}
-                                  className="px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
-                                  type="button"
-                                  title="Delete product"
-                                >
-                                  🗑
-                                </button>
-                              </>
-                            )}
-                          </td>
-                        </tr>
-                      ))
                     )}
+                    {filteredItems.map(item => (
+                      <tr key={item.id} className="border border-gray-200 hover:bg-gray-50">
+                        <td className="p-2 border border-gray-300">
+                          {editingId === item.id ? (
+                            <input
+                              type="text"
+                              value={editName}
+                              onChange={e => setEditName(e.target.value)}
+                              className="w-full px-2 py-1 border rounded"
+                            />
+                          ) : (
+                            item.name
+                          )}
+                        </td>
+                        <td className="p-2 border border-gray-300">{item.stock}</td>
+                        <td className="p-2 border border-gray-300 space-x-1">
+                          <button
+                            title="Add 1"
+                            onClick={() => updateStock(item.id, 1)}
+                            className="px-2 py-1 bg-green-600 text-white rounded hover:bg-green-700"
+                          >
+                            +
+                          </button>
+                          <button
+                            title="Subtract 1"
+                            onClick={() => updateStock(item.id, -1)}
+                            className="px-2 py-1 bg-red-600 text-white rounded hover:bg-red-700"
+                          >
+                            -
+                          </button>
+                        </td>
+                        <td className="p-2 border border-gray-300 space-x-2 flex items-center">
+                          <input
+                            type="number"
+                            min="1"
+                            placeholder="+"
+                            value={customAddItem[item.id] || ''}
+                            onChange={e => setCustomAddItem(prev => ({ ...prev, [item.id]: e.target.value }))}
+                            className="w-16 px-2 py-1 border rounded"
+                          />
+                          <button
+                            onClick={() => handleCustomAddItem(item.id)}
+                            className="px-3 py-1 bg-green-500 text-white rounded hover:bg-green-600"
+                          >
+                            Apply
+                          </button>
+                          <input
+                            type="number"
+                            min="1"
+                            placeholder="-"
+                            value={customSubtractItem[item.id] || ''}
+                            onChange={e => setCustomSubtractItem(prev => ({ ...prev, [item.id]: e.target.value }))}
+                            className="w-16 px-2 py-1 border rounded"
+                          />
+                          <button
+                            onClick={() => handleCustomSubtractItem(item.id)}
+                            className="px-3 py-1 bg-red-500 text-white rounded hover:bg-red-600"
+                          >
+                            Apply
+                          </button>
+                        </td>
+                        <td className="p-2 border border-gray-300 space-x-1 whitespace-nowrap">
+                          {editingId === item.id ? (
+                            <>
+                              <button
+                                onClick={saveEdit}
+                                className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700"
+                              >
+                                Save
+                              </button>
+                              <button
+                                onClick={cancelEdit}
+                                className="px-3 py-1 bg-gray-300 rounded hover:bg-gray-400 ml-1"
+                              >
+                                Cancel
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <button
+                                onClick={() => startEdit(item)}
+                                className="px-3 py-1 bg-yellow-400 text-white rounded hover:bg-yellow-500"
+                              >
+                                Edit
+                              </button>
+                              <button
+                                onClick={() => deleteItem(item.id)}
+                                className="px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700 ml-1"
+                              >
+                                Delete
+                              </button>
+                            </>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
 
-              {/* Packs List */}
-              <h2 className="mt-10 mb-4 text-2xl font-semibold text-gray-700">
-                📦 Product Packs
-              </h2>
-
-              <div className="overflow-x-auto">
-                <table className="w-full border-collapse border border-gray-300 text-sm">
-                  <thead className="bg-gray-100">
-                    <tr>
-                      <th className="border border-gray-300 p-2 text-left">Pack Name</th>
-                      <th className="border border-gray-300 p-2 w-24">Available</th>
-                      <th className="border border-gray-300 p-2 w-48">Quick Edit</th>
-                      <th className="border border-gray-300 p-2 w-56">Custom Qty</th>
-                      <th className="border border-gray-300 p-2 w-20">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {packs.length === 0 ? (
+              {/* Packs Table */}
+              <div className="overflow-x-auto mb-10">
+                <h2 className="text-xl font-semibold mb-4">Product Packs</h2>
+                {packs.length === 0 && <p className="text-gray-500 mb-6">No packs available.</p>}
+                {packs.length > 0 && (
+                  <table className="w-full text-left border-collapse border border-gray-200">
+                    <thead className="bg-gray-100">
                       <tr>
-                        <td colSpan="5" className="p-4 text-center text-gray-500">
-                          No packs created.
-                        </td>
+                        <th className="p-2 border border-gray-300">Pack Name</th>
+                        <th className="p-2 border border-gray-300">Available</th>
+                        <th className="p-2 border border-gray-300">Quick Edit</th>
+                        <th className="p-2 border border-gray-300">Custom Change</th>
+                        <th className="p-2 border border-gray-300">Actions</th>
                       </tr>
-                    ) : (
-                      packs.map(pack => {
+                    </thead>
+                    <tbody>
+                      {packs.map(pack => {
                         const available = getPackAvailability(pack);
                         return (
-                          <tr key={pack.id} className="hover:bg-gray-50">
-                            <td className="border border-gray-300 p-2">{pack.name}</td>
-                            <td className="border border-gray-300 p-2 text-center font-mono">{available}</td>
-                            <td className="border border-gray-300 p-2 text-center space-x-2">
+                          <tr key={pack.id} className="border border-gray-200 hover:bg-gray-50">
+                            <td className="p-2 border border-gray-300">{pack.name}</td>
+                            <td className="p-2 border border-gray-300">{available}</td>
+                            <td className="p-2 border border-gray-300 space-x-1">
                               <button
-                                onClick={() => updatePackStock(pack.id, 1)}
-                                disabled={!isConnected}
-                                className="px-3 py-1 bg-green-500 text-white rounded hover:bg-green-600 transition-colors"
                                 title="Add 1 pack"
-                                type="button"
+                                onClick={() => updatePackStock(pack.id, 1)}
+                                className="px-2 py-1 bg-green-600 text-white rounded hover:bg-green-700"
                               >
                                 +
                               </button>
                               <button
-                                onClick={() => updatePackStock(pack.id, -1)}
-                                disabled={!isConnected}
-                                className="px-3 py-1 bg-red-500 text-white rounded hover:bg-red-600 transition-colors"
                                 title="Subtract 1 pack"
-                                type="button"
+                                onClick={() => updatePackStock(pack.id, -1)}
+                                className="px-2 py-1 bg-red-600 text-white rounded hover:bg-red-700"
                               >
                                 -
                               </button>
                             </td>
-                            <td className="border border-gray-300 p-2 text-center flex items-center gap-2 justify-center">
+                            <td className="p-2 border border-gray-300 space-x-2 flex items-center">
                               <input
                                 type="number"
                                 min="1"
@@ -697,16 +647,10 @@
                                 className="w-16 px-2 py-1 border rounded"
                               />
                               <button
-                                onClick={() => {
-                                  const val = parseInt(customAddPack[pack.id]);
-                                  if (val > 0) updatePackStock(pack.id, val);
-                                }}
-                                disabled={!isConnected || !(parseInt(customAddPack[pack.id]) > 0)}
-                                className="px-3 py-1 bg-green-600 text-white rounded hover:bg-green-700 transition-colors"
-                                type="button"
-                                title="Add custom pack quantity"
+                                onClick={() => handleCustomAddPack(pack.id)}
+                                className="px-3 py-1 bg-green-500 text-white rounded hover:bg-green-600"
                               >
-                                +
+                                Apply
                               </button>
                               <input
                                 type="number"
@@ -717,37 +661,35 @@
                                 className="w-16 px-2 py-1 border rounded"
                               />
                               <button
-                                onClick={() => {
-                                  const val = parseInt(customSubtractPack[pack.id]);
-                                  if (val > 0) updatePackStock(pack.id, -val);
-                                }}
-                                disabled={!isConnected || !(parseInt(customSubtractPack[pack.id]) > 0)}
-                                className="px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
-                                type="button"
-                                title="Subtract custom pack quantity"
+                                onClick={() => handleCustomSubtractPack(pack.id)}
+                                className="px-3 py-1 bg-red-500 text-white rounded hover:bg-red-600"
                               >
-                                -
+                                Apply
                               </button>
                             </td>
-                            <td className="border border-gray-300 p-2 text-center space-x-1">
+                            <td className="p-2 border border-gray-300 whitespace-nowrap">
                               <button
-                                onClick={() => {
-                                  if (window.confirm(`Delete pack "${pack.name}"?`)) deletePack(pack.id);
-                                }}
-                                className="px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
-                                type="button"
-                                title="Delete pack"
+                                onClick={() => deletePack(pack.id)}
+                                className="px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700"
                               >
-                                🗑
+                                Delete
                               </button>
                             </td>
                           </tr>
                         );
-                      })
-                    )}
-                  </tbody>
-                </table>
+                      })}
+                    </tbody>
+                  </table>
+                )}
               </div>
+
+              {isLoading && (
+                <div className="fixed inset-0 bg-black bg-opacity-20 flex items-center justify-center">
+                  <div className="bg-white p-6 rounded shadow text-center">
+                    <p className="text-gray-700 font-semibold">Loading...</p>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
