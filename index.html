@@ -16,7 +16,6 @@
   <script type="text/babel">
     const { useState, useEffect } = React;
 
-    // === Your Firebase config baked in here ===
     const firebaseConfig = {
       apiKey: "AIzaSyDXswzHsLKCTw5z5K4BWYCoolfogybbnvE",
       authDomain: "batal-games.firebaseapp.com",
@@ -33,12 +32,6 @@
       const [isConnected, setIsConnected] = useState(false);
       const [error, setError] = useState(null);
 
-      // Custom add/subtract inputs for items and packs
-      const [customAddItem, setCustomAddItem] = useState({});
-      const [customSubtractItem, setCustomSubtractItem] = useState({});
-      const [customAddPack, setCustomAddPack] = useState({});
-      const [customSubtractPack, setCustomSubtractPack] = useState({});
-
       const [newItemName, setNewItemName] = useState('');
       const [newItemStock, setNewItemStock] = useState('');
       const [showPackForm, setShowPackForm] = useState(false);
@@ -48,8 +41,15 @@
       const [editName, setEditName] = useState('');
       const [searchQuery, setSearchQuery] = useState('');
 
+      // Custom add/subtract quantities inputs per item and pack (keys are IDs)
+      const [customAddItem, setCustomAddItem] = useState({});
+      const [customSubtractItem, setCustomSubtractItem] = useState({});
+      const [customAddPack, setCustomAddPack] = useState({});
+      const [customSubtractPack, setCustomSubtractPack] = useState({});
+
       let db = null;
 
+      // Initialize Firebase and Firestore
       const initializeFirebase = () => {
         try {
           if (!firebase.apps.length) {
@@ -94,17 +94,664 @@
         initializeFirebase();
       }, []);
 
-      // The rest of the code remains the same as before
-      // Add new item, update stock, delete item, edit item, pack management...
-      // For brevity, I'm not repeating everything here but will include full code below.
+      // Add new item
+      const addItem = async () => {
+        if (!newItemName.trim() || !newItemStock || !db) return;
+        try {
+          const docRef = await db.collection('items').add({
+            name: newItemName.trim(),
+            stock: parseInt(newItemStock) || 0,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+          });
+          const newItem = {
+            id: docRef.id,
+            name: newItemName.trim(),
+            stock: parseInt(newItemStock) || 0,
+          };
+          setItems(prev => [...prev, newItem]);
+          setNewItemName('');
+          setNewItemStock('');
+        } catch (error) {
+          setError(`Failed to add item: ${error.message}`);
+        }
+      };
 
-      // ... rest of the full app code from previous response ...
+      // Update stock for an item by a given amount (+/-)
+      const updateStock = async (id, change) => {
+        const item = items.find(i => i.id === id);
+        if (!item || !db) return;
+        const newStock = Math.max(0, item.stock + change);
+        try {
+          await db.collection('items').doc(id).update({
+            stock: newStock,
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+          });
+          setItems(prev =>
+            prev.map(i => (i.id === id ? { ...i, stock: newStock } : i))
+          );
+          // Clear custom inputs for this item
+          setCustomAddItem(prev => ({ ...prev, [id]: '' }));
+          setCustomSubtractItem(prev => ({ ...prev, [id]: '' }));
+        } catch (error) {
+          setError(`Failed to update stock: ${error.message}`);
+        }
+      };
 
-      // To avoid making this message too huge here, 
-      // I’ll provide the full complete updated code with baked-in config in a single file at the end.
-      // But basically just remove the config input UI,
-      // and initialize Firebase immediately with the baked config.
+      // Delete item, check if used in packs
+      const deleteItem = async (id) => {
+        const usedInPacks = packs.filter(pack =>
+          pack.components && pack.components.some(c => c.itemId === id)
+        );
+        if (usedInPacks.length > 0) {
+          alert(`Cannot delete item. Used in packs: ${usedInPacks.map(p => p.name).join(', ')}`);
+          return;
+        }
+        try {
+          await db.collection('items').doc(id).delete();
+          setItems(prev => prev.filter(item => item.id !== id));
+        } catch (error) {
+          setError(`Failed to delete item: ${error.message}`);
+        }
+      };
 
+      // Edit item name save
+      const saveEdit = async () => {
+        if (!editName.trim() || !db) return;
+        try {
+          await db.collection('items').doc(editingId).update({
+            name: editName.trim(),
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+          });
+          setItems(prev =>
+            prev.map(item =>
+              item.id === editingId ? { ...item, name: editName.trim() } : item
+            )
+          );
+          setEditingId(null);
+          setEditName('');
+        } catch (error) {
+          setError(`Failed to update item: ${error.message}`);
+        }
+      };
+
+      // Pack management
+
+      const addComponentToPack = (itemId) => {
+        const item = items.find(i => i.id === itemId);
+        if (!item) return;
+        const existing = packComponents.find(c => c.itemId === itemId);
+        if (existing) {
+          setPackComponents(prev =>
+            prev.map(c =>
+              c.itemId === itemId ? { ...c, quantity: c.quantity + 1 } : c
+            )
+          );
+        } else {
+          setPackComponents(prev => [...prev, { itemId, name: item.name, quantity: 1 }]);
+        }
+      };
+
+      const addPack = async () => {
+        if (!newPackName.trim() || packComponents.length === 0 || !db) return;
+        try {
+          const docRef = await db.collection('packs').add({
+            name: newPackName.trim(),
+            components: packComponents,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+          });
+          const newPack = {
+            id: docRef.id,
+            name: newPackName.trim(),
+            components: [...packComponents],
+          };
+          setPacks(prev => [...prev, newPack]);
+          setNewPackName('');
+          setPackComponents([]);
+          setShowPackForm(false);
+        } catch (error) {
+          setError(`Failed to create pack: ${error.message}`);
+        }
+      };
+
+      const deletePack = async (id) => {
+        try {
+          await db.collection('packs').doc(id).delete();
+          setPacks(prev => prev.filter(pack => pack.id !== id));
+        } catch (error) {
+          setError(`Failed to delete pack: ${error.message}`);
+        }
+      };
+
+      const removeComponentFromPack = (itemId) => {
+        setPackComponents(prev => prev.filter(c => c.itemId !== itemId));
+      };
+
+      const updateComponentQuantity = (itemId, newQuantity) => {
+        if (newQuantity <= 0) {
+          removeComponentFromPack(itemId);
+        } else {
+          setPackComponents(prev =>
+            prev.map(c =>
+              c.itemId === itemId ? { ...c, quantity: newQuantity } : c
+            )
+          );
+        }
+      };
+
+      // Calculate how many packs are available based on components stock
+      const getPackAvailability = (pack) => {
+        if (!pack.components || pack.components.length === 0) return 0;
+        let minAvailable = Infinity;
+        for (const component of pack.components) {
+          const item = items.find(i => i.id === component.itemId);
+          if (!item) return 0;
+          const available = Math.floor(item.stock / component.quantity);
+          minAvailable = Math.min(minAvailable, available);
+        }
+        return minAvailable === Infinity ? 0 : minAvailable;
+      };
+
+      // Update pack stock by change (positive or negative)
+      const updatePackStock = async (packId, change) => {
+        const pack = packs.find(p => p.id === packId);
+        if (!pack || !pack.components) return;
+
+        if (change < 0) {
+          const available = getPackAvailability(pack);
+          if (available < Math.abs(change)) {
+            alert(`Not enough components! Only ${available} packs available.`);
+            return;
+          }
+        }
+
+        // Update component stocks accordingly
+        const promises = pack.components.map(component => {
+          const newChange = -(component.quantity * change);
+          return updateStock(component.itemId, newChange);
+        });
+
+        try {
+          await Promise.all(promises);
+          // Clear custom inputs for this pack
+          setCustomAddPack(prev => ({ ...prev, [packId]: '' }));
+          setCustomSubtractPack(prev => ({ ...prev, [packId]: '' }));
+        } catch (error) {
+          setError(`Failed to update pack stock: ${error.message}`);
+        }
+      };
+
+      // Start and cancel editing for item names
+      const startEdit = (item) => {
+        setEditingId(item.id);
+        setEditName(item.name);
+      };
+      const cancelEdit = () => {
+        setEditingId(null);
+        setEditName('');
+      };
+
+      // Export data as JSON file
+      const exportData = () => {
+        const data = { items, packs };
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = 'inventory-data.json';
+        link.click();
+        URL.revokeObjectURL(url);
+      };
+
+      // Filter items by search query
+      const filteredItems = items.filter(item =>
+        item.name.toLowerCase().includes(searchQuery.toLowerCase())
+      );
+
+      // Totals
+      const totalStock = items.reduce((sum, item) => sum + item.stock, 0);
+      const totalPacksAvailable = packs.reduce((sum, pack) => sum + getPackAvailability(pack), 0);
+
+      return (
+        <div className="min-h-screen bg-gray-50 p-4">
+          <div className="max-w-6xl mx-auto">
+            <div className="bg-white rounded-lg shadow-lg p-6">
+              {/* Header */}
+              <div className="flex items-center justify-between mb-6">
+                <h1 className="text-3xl font-bold text-gray-800 flex items-center gap-2">
+                  🔥 Stock Inventory Manager
+                  <span className="text-sm font-normal text-gray-500">with Firebase</span>
+                </h1>
+                <div className="flex gap-2 items-center">
+                  <div className={`w-3 h-3 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                  <span className={`text-sm ${isConnected ? 'text-green-700' : 'text-red-700'}`}>
+                    {isConnected ? 'Connected' : 'Disconnected'}
+                  </span>
+                  <button
+                    onClick={exportData}
+                    className="px-3 py-1 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors ml-4"
+                  >
+                    Export
+                  </button>
+                </div>
+              </div>
+
+              {error && (
+                <div className="p-3 bg-red-50 border border-red-200 rounded-md mb-6">
+                  <p className="text-red-700 text-sm">{error}</p>
+                </div>
+              )}
+
+              {/* Summary Cards */}
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+                <div className="bg-blue-50 p-4 rounded-lg">
+                  <p className="text-sm text-blue-600 font-medium">Products</p>
+                  <p className="text-2xl font-bold text-blue-800">{items.length}</p>
+                </div>
+                <div className="bg-green-50 p-4 rounded-lg">
+                  <p className="text-sm text-green-600 font-medium">Total Stock</p>
+                  <p className="text-2xl font-bold text-green-800">{totalStock}</p>
+                </div>
+                <div className="bg-purple-50 p-4 rounded-lg">
+                  <p className="text-sm text-purple-600 font-medium">Pack Types</p>
+                  <p className="text-2xl font-bold text-purple-800">{packs.length}</p>
+                </div>
+                <div className="bg-orange-50 p-4 rounded-lg">
+                  <p className="text-sm text-orange-600 font-medium">Available Packs</p>
+                  <p className="text-2xl font-bold text-orange-800">{totalPacksAvailable}</p>
+                </div>
+              </div>
+
+              {/* Add Item Form */}
+              <div className="border rounded-lg p-4 mb-6">
+                <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
+                  ➕ Add Product
+                </h2>
+                <div className="flex gap-3">
+                  <input
+                    type="text"
+                    placeholder="Product name"
+                    value={newItemName}
+                    onChange={(e) => setNewItemName(e.target.value)}
+                    className="flex-1 px-3 py-2 border rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                    onKeyPress={(e) => e.key === 'Enter' && addItem()}
+                  />
+                  <input
+                    type="number"
+                    placeholder="Stock"
+                    value={newItemStock}
+                    onChange={(e) => setNewItemStock(e.target.value)}
+                    className="w-32 px-3 py-2 border rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                    onKeyPress={(e) => e.key === 'Enter' && addItem()}
+                  />
+                  <button
+                    onClick={addItem}
+                    disabled={!newItemName.trim() || !newItemStock || !isConnected}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                  >
+                    Add
+                  </button>
+                </div>
+              </div>
+
+              {/* Pack Form */}
+              <div className="border rounded-lg p-4 mb-6">
+                <div className="flex justify-between items-center mb-3">
+                  <h2 className="text-lg font-semibold flex items-center gap-2">
+                    📦 Create Product Pack
+                  </h2>
+                  <button
+                    onClick={() => setShowPackForm(!showPackForm)}
+                    disabled={!isConnected}
+                    className="px-3 py-1 bg-purple-600 text-white rounded-md hover:bg-purple-700 transition-colors"
+                  >
+                    {showPackForm ? 'Close' : 'Create'}
+                  </button>
+                </div>
+                {showPackForm && (
+                  <div>
+                    <input
+                      type="text"
+                      placeholder="Pack name"
+                      value={newPackName}
+                      onChange={(e) => setNewPackName(e.target.value)}
+                      className="w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-purple-500 focus:outline-none mb-3"
+                      onKeyPress={(e) => {
+                        if (e.key === 'Enter' && packComponents.length > 0) addPack();
+                      }}
+                    />
+
+                    <div className="mb-3">
+                      <p className="font-semibold mb-1">Add products to pack:</p>
+                      <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto border rounded p-2 bg-white">
+                        {items.map(item => (
+                          <button
+                            key={item.id}
+                            onClick={() => addComponentToPack(item.id)}
+                            className="px-2 py-1 bg-green-100 text-green-800 rounded hover:bg-green-200 transition-colors text-sm"
+                            type="button"
+                          >
+                            {item.name}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="mb-3">
+                      <p className="font-semibold mb-1">Pack components:</p>
+                      {packComponents.length === 0 && (
+                        <p className="text-sm italic text-gray-500">No components added yet.</p>
+                      )}
+                      {packComponents.map(component => (
+                        <div key={component.itemId} className="flex items-center gap-2 mb-2">
+                          <span className="flex-1">{component.name}</span>
+                          <input
+                            type="number"
+                            min="1"
+                            value={component.quantity}
+                            onChange={(e) =>
+                              updateComponentQuantity(component.itemId, parseInt(e.target.value) || 1)
+                            }
+                            className="w-20 px-2 py-1 border rounded"
+                          />
+                          <button
+                            onClick={() => removeComponentFromPack(component.itemId)}
+                            className="px-2 py-1 text-red-600 hover:text-red-800"
+                            title="Remove component"
+                            type="button"
+                          >
+                            &times;
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+
+                    <button
+                      onClick={addPack}
+                      disabled={!newPackName.trim() || packComponents.length === 0}
+                      className="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                    >
+                      Save Pack
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Search */}
+              <input
+                type="text"
+                placeholder="Search products..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full mb-4 px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+
+              {/* Items List */}
+              <div className="overflow-x-auto">
+                <table className="w-full border-collapse border border-gray-300 text-sm">
+                  <thead className="bg-gray-100">
+                    <tr>
+                      <th className="border border-gray-300 p-2 text-left">Product</th>
+                      <th className="border border-gray-300 p-2 w-24">Stock</th>
+                      <th className="border border-gray-300 p-2 w-48">Quick Edit</th>
+                      <th className="border border-gray-300 p-2 w-56">Custom Qty</th>
+                      <th className="border border-gray-300 p-2 w-20">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {isLoading ? (
+                      <tr>
+                        <td colSpan="5" className="p-4 text-center text-gray-500">
+                          Loading...
+                        </td>
+                      </tr>
+                    ) : filteredItems.length === 0 ? (
+                      <tr>
+                        <td colSpan="5" className="p-4 text-center text-gray-500">
+                          No products found.
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredItems.map(item => (
+                        <tr key={item.id} className="hover:bg-gray-50">
+                          <td className="border border-gray-300 p-2">
+                            {editingId === item.id ? (
+                              <input
+                                type="text"
+                                value={editName}
+                                onChange={e => setEditName(e.target.value)}
+                                className="w-full px-2 py-1 border rounded"
+                              />
+                            ) : (
+                              item.name
+                            )}
+                          </td>
+                          <td className="border border-gray-300 p-2 text-center font-mono">{item.stock}</td>
+                          <td className="border border-gray-300 p-2 text-center space-x-2">
+                            <button
+                              onClick={() => updateStock(item.id, 1)}
+                              disabled={!isConnected}
+                              className="px-3 py-1 bg-green-500 text-white rounded hover:bg-green-600 transition-colors"
+                              title="Add 1"
+                              type="button"
+                            >
+                              +
+                            </button>
+                            <button
+                              onClick={() => updateStock(item.id, -1)}
+                              disabled={!isConnected}
+                              className="px-3 py-1 bg-red-500 text-white rounded hover:bg-red-600 transition-colors"
+                              title="Subtract 1"
+                              type="button"
+                            >
+                              -
+                            </button>
+                          </td>
+                          <td className="border border-gray-300 p-2 text-center flex items-center gap-2 justify-center">
+                            <input
+                              type="number"
+                              min="1"
+                              placeholder="+"
+                              value={customAddItem[item.id] || ''}
+                              onChange={e => setCustomAddItem(prev => ({ ...prev, [item.id]: e.target.value }))}
+                              className="w-16 px-2 py-1 border rounded"
+                            />
+                            <button
+                              onClick={() => {
+                                const val = parseInt(customAddItem[item.id]);
+                                if (val > 0) updateStock(item.id, val);
+                              }}
+                              disabled={!isConnected || !(parseInt(customAddItem[item.id]) > 0)}
+                              className="px-3 py-1 bg-green-600 text-white rounded hover:bg-green-700 transition-colors"
+                              type="button"
+                              title="Add custom quantity"
+                            >
+                              +
+                            </button>
+                            <input
+                              type="number"
+                              min="1"
+                              placeholder="-"
+                              value={customSubtractItem[item.id] || ''}
+                              onChange={e => setCustomSubtractItem(prev => ({ ...prev, [item.id]: e.target.value }))}
+                              className="w-16 px-2 py-1 border rounded"
+                            />
+                            <button
+                              onClick={() => {
+                                const val = parseInt(customSubtractItem[item.id]);
+                                if (val > 0) updateStock(item.id, -val);
+                              }}
+                              disabled={!isConnected || !(parseInt(customSubtractItem[item.id]) > 0)}
+                              className="px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
+                              type="button"
+                              title="Subtract custom quantity"
+                            >
+                              -
+                            </button>
+                          </td>
+                          <td className="border border-gray-300 p-2 text-center space-x-1">
+                            {editingId === item.id ? (
+                              <>
+                                <button
+                                  onClick={saveEdit}
+                                  disabled={!editName.trim() || !isConnected}
+                                  className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+                                  type="button"
+                                >
+                                  Save
+                                </button>
+                                <button
+                                  onClick={cancelEdit}
+                                  className="px-3 py-1 bg-gray-300 rounded hover:bg-gray-400 transition-colors"
+                                  type="button"
+                                >
+                                  Cancel
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                <button
+                                  onClick={() => startEdit(item)}
+                                  className="px-3 py-1 bg-yellow-400 rounded hover:bg-yellow-500 transition-colors"
+                                  type="button"
+                                  title="Edit name"
+                                >
+                                  ✎
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    if (window.confirm(`Delete product "${item.name}"?`)) deleteItem(item.id);
+                                  }}
+                                  className="px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
+                                  type="button"
+                                  title="Delete product"
+                                >
+                                  🗑
+                                </button>
+                              </>
+                            )}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Packs List */}
+              <h2 className="mt-10 mb-4 text-2xl font-semibold text-gray-700">
+                📦 Product Packs
+              </h2>
+
+              <div className="overflow-x-auto">
+                <table className="w-full border-collapse border border-gray-300 text-sm">
+                  <thead className="bg-gray-100">
+                    <tr>
+                      <th className="border border-gray-300 p-2 text-left">Pack Name</th>
+                      <th className="border border-gray-300 p-2 w-24">Available</th>
+                      <th className="border border-gray-300 p-2 w-48">Quick Edit</th>
+                      <th className="border border-gray-300 p-2 w-56">Custom Qty</th>
+                      <th className="border border-gray-300 p-2 w-20">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {packs.length === 0 ? (
+                      <tr>
+                        <td colSpan="5" className="p-4 text-center text-gray-500">
+                          No packs created.
+                        </td>
+                      </tr>
+                    ) : (
+                      packs.map(pack => {
+                        const available = getPackAvailability(pack);
+                        return (
+                          <tr key={pack.id} className="hover:bg-gray-50">
+                            <td className="border border-gray-300 p-2">{pack.name}</td>
+                            <td className="border border-gray-300 p-2 text-center font-mono">{available}</td>
+                            <td className="border border-gray-300 p-2 text-center space-x-2">
+                              <button
+                                onClick={() => updatePackStock(pack.id, 1)}
+                                disabled={!isConnected}
+                                className="px-3 py-1 bg-green-500 text-white rounded hover:bg-green-600 transition-colors"
+                                title="Add 1 pack"
+                                type="button"
+                              >
+                                +
+                              </button>
+                              <button
+                                onClick={() => updatePackStock(pack.id, -1)}
+                                disabled={!isConnected}
+                                className="px-3 py-1 bg-red-500 text-white rounded hover:bg-red-600 transition-colors"
+                                title="Subtract 1 pack"
+                                type="button"
+                              >
+                                -
+                              </button>
+                            </td>
+                            <td className="border border-gray-300 p-2 text-center flex items-center gap-2 justify-center">
+                              <input
+                                type="number"
+                                min="1"
+                                placeholder="+"
+                                value={customAddPack[pack.id] || ''}
+                                onChange={e => setCustomAddPack(prev => ({ ...prev, [pack.id]: e.target.value }))}
+                                className="w-16 px-2 py-1 border rounded"
+                              />
+                              <button
+                                onClick={() => {
+                                  const val = parseInt(customAddPack[pack.id]);
+                                  if (val > 0) updatePackStock(pack.id, val);
+                                }}
+                                disabled={!isConnected || !(parseInt(customAddPack[pack.id]) > 0)}
+                                className="px-3 py-1 bg-green-600 text-white rounded hover:bg-green-700 transition-colors"
+                                type="button"
+                                title="Add custom pack quantity"
+                              >
+                                +
+                              </button>
+                              <input
+                                type="number"
+                                min="1"
+                                placeholder="-"
+                                value={customSubtractPack[pack.id] || ''}
+                                onChange={e => setCustomSubtractPack(prev => ({ ...prev, [pack.id]: e.target.value }))}
+                                className="w-16 px-2 py-1 border rounded"
+                              />
+                              <button
+                                onClick={() => {
+                                  const val = parseInt(customSubtractPack[pack.id]);
+                                  if (val > 0) updatePackStock(pack.id, -val);
+                                }}
+                                disabled={!isConnected || !(parseInt(customSubtractPack[pack.id]) > 0)}
+                                className="px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
+                                type="button"
+                                title="Subtract custom pack quantity"
+                              >
+                                -
+                              </button>
+                            </td>
+                            <td className="border border-gray-300 p-2 text-center space-x-1">
+                              <button
+                                onClick={() => {
+                                  if (window.confirm(`Delete pack "${pack.name}"?`)) deletePack(pack.id);
+                                }}
+                                className="px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
+                                type="button"
+                                title="Delete pack"
+                              >
+                                🗑
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
     }
 
     ReactDOM.createRoot(document.getElementById('root')).render(<StockInventoryApp />);
