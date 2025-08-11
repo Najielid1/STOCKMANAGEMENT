@@ -10,6 +10,18 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+  <style>
+    .card-transition {
+      transition: all 0.2s ease-in-out;
+    }
+    .card-transition:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+    }
+    .search-highlight {
+      background-color: #fef08a;
+    }
+  </style>
 </head>
 <body>
   <div id="root"></div>
@@ -47,6 +59,7 @@
       const [newPackName, setNewPackName] = useState('');
       const [packComponents, setPackComponents] = useState([]);
       const [searchQuery, setSearchQuery] = useState('');
+      const [activeTab, setActiveTab] = useState('items'); // 'items' or 'packs'
 
       // Load initial data
       useEffect(() => {
@@ -188,8 +201,27 @@
         }));
       };
 
+      // Highlight search matches
+      const highlightSearch = (text) => {
+        if (!searchQuery.trim()) return text;
+        
+        const regex = new RegExp(`(${searchQuery})`, 'gi');
+        return text.split(regex).map((part, i) => 
+          part.toLowerCase() === searchQuery.toLowerCase() ? 
+          <span key={i} className="search-highlight">{part}</span> : part
+        );
+      };
+
+      // Filter items/packs based on search
       const filteredItems = items.filter(item => 
         item.name.toLowerCase().includes(searchQuery.toLowerCase())
+      );
+
+      const filteredPacks = packs.filter(pack => 
+        pack.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (pack.components && pack.components.some(c => 
+          items.some(i => i.id === c.itemId && i.name.toLowerCase().includes(searchQuery.toLowerCase()))
+        ))
       );
 
       if (loading) {
@@ -261,257 +293,262 @@
               </div>
             </div>
 
-            {/* Search and Items Table */}
-            <div className="bg-white rounded-lg shadow-sm overflow-hidden mb-6">
-              <div className="p-4 border-b border-gray-200">
-                <input
-                  type="search"
-                  placeholder="Search products..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                />
-              </div>
-              
-              <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-200">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Product</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Stock</th>
-                      <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
-                    {filteredItems.length === 0 ? (
-                      <tr>
-                        <td colSpan="3" className="px-6 py-4 text-center text-gray-500">
-                          No products found
-                        </td>
-                      </tr>
-                    ) : (
-                      filteredItems.map((item) => (
-                        <tr key={item.id} className="hover:bg-gray-50">
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <div className="text-sm font-medium text-gray-900">{item.name}</div>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <div className="text-sm text-gray-900">{item.stock}</div>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                            <div className="flex justify-end space-x-2">
-                              <button
-                                onClick={() => updateStock(item.id, 1)}
-                                className="px-3 py-1 bg-green-100 text-green-800 rounded hover:bg-green-200"
-                              >
-                                +1
-                              </button>
-                              <button
-                                onClick={() => updateStock(item.id, -1)}
-                                disabled={item.stock <= 0}
-                                className="px-3 py-1 bg-red-100 text-red-800 rounded hover:bg-red-200 disabled:opacity-50"
-                              >
-                                -1
-                              </button>
-                              <button
-                                onClick={() => deleteItem(item.id)}
-                                className="px-3 py-1 bg-gray-100 text-gray-800 rounded hover:bg-gray-200"
-                              >
-                                Delete
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
+            {/* Search and Tabs */}
+            <div className="bg-white rounded-lg shadow-sm p-4 mb-6">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                <div className="w-full sm:w-auto">
+                  <input
+                    type="search"
+                    placeholder={`Search ${activeTab === 'items' ? 'products' : 'packs'}...`}
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                  />
+                </div>
+                <div className="flex border border-gray-300 rounded-md overflow-hidden">
+                  <button
+                    onClick={() => setActiveTab('items')}
+                    className={`px-4 py-2 ${activeTab === 'items' ? 'bg-blue-600 text-white' : 'bg-white text-gray-700'}`}
+                  >
+                    Products
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('packs')}
+                    className={`px-4 py-2 ${activeTab === 'packs' ? 'bg-blue-600 text-white' : 'bg-white text-gray-700'}`}
+                  >
+                    Packs
+                  </button>
+                </div>
               </div>
             </div>
 
-            {/* Packs Section */}
-            <div className="bg-white rounded-lg shadow-sm p-6">
-              <div className="flex justify-between items-center mb-4">
-                <h2 className="text-lg font-semibold">Packs</h2>
-                <button
-                  onClick={() => setShowPackForm(true)}
-                  className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors"
-                >
-                  Create New Pack
-                </button>
-              </div>
-
-              {showPackForm && (
-                <div className="mb-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
-                  <h3 className="font-medium mb-3">New Pack Details</h3>
-                  
-                  <div className="mb-4">
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Pack Name</label>
-                    <input
-                      type="text"
-                      placeholder="e.g. Starter Kit"
-                      value={newPackName}
-                      onChange={(e) => setNewPackName(e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-green-500 focus:outline-none"
-                    />
+            {/* Items/Packs Display */}
+            {activeTab === 'items' ? (
+              <div className="mb-6">
+                <h2 className="text-xl font-semibold mb-4">Products ({filteredItems.length})</h2>
+                {filteredItems.length === 0 ? (
+                  <div className="bg-white rounded-lg shadow-sm p-6 text-center text-gray-500">
+                    No products found
                   </div>
-
-                  <div className="mb-4">
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Add Components</label>
-                    <div className="flex flex-wrap gap-2 mb-2 max-h-40 overflow-y-auto p-2 bg-white border border-gray-300 rounded-md">
-                      {items.length === 0 ? (
-                        <p className="text-sm text-gray-500">No products available</p>
-                      ) : (
-                        items.map(item => (
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {filteredItems.map((item) => (
+                      <div key={item.id} className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 card-transition">
+                        <div className="flex justify-between items-start">
+                          <h3 className="text-lg font-medium">
+                            {highlightSearch(item.name)}
+                          </h3>
+                          <span className="text-xl font-bold">{item.stock}</span>
+                        </div>
+                        <div className="mt-4 flex justify-between">
                           <button
-                            key={item.id}
-                            onClick={() => {
-                              const existing = packComponents.find(c => c.itemId === item.id);
-                              if (existing) {
-                                setPackComponents(packComponents.map(c => 
-                                  c.itemId === item.id ? { ...c, quantity: c.quantity + 1 } : c
-                                ));
-                              } else {
-                                setPackComponents([...packComponents, {
-                                  itemId: item.id,
-                                  name: item.name,
-                                  quantity: 1
-                                }]);
-                              }
-                            }}
-                            className="px-3 py-1 text-xs bg-green-100 text-green-800 rounded-full hover:bg-green-200"
+                            onClick={() => updateStock(item.id, 1)}
+                            className="px-3 py-1 bg-green-100 text-green-800 rounded hover:bg-green-200"
                           >
-                            {item.name}
+                            +1
                           </button>
-                        ))
+                          <button
+                            onClick={() => updateStock(item.id, -1)}
+                            disabled={item.stock <= 0}
+                            className="px-3 py-1 bg-red-100 text-red-800 rounded hover:bg-red-200 disabled:opacity-50"
+                          >
+                            -1
+                          </button>
+                          <button
+                            onClick={() => deleteItem(item.id)}
+                            className="px-3 py-1 bg-gray-100 text-gray-800 rounded hover:bg-gray-200"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div>
+                <div className="flex justify-between items-center mb-4">
+                  <h2 className="text-xl font-semibold">Packs ({filteredPacks.length})</h2>
+                  <button
+                    onClick={() => setShowPackForm(true)}
+                    className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors"
+                  >
+                    Create New Pack
+                  </button>
+                </div>
+
+                {showPackForm && (
+                  <div className="mb-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
+                    <h3 className="font-medium mb-3">New Pack Details</h3>
+                    
+                    <div className="mb-4">
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Pack Name</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. Starter Kit"
+                        value={newPackName}
+                        onChange={(e) => setNewPackName(e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-green-500 focus:outline-none"
+                      />
+                    </div>
+
+                    <div className="mb-4">
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Add Components</label>
+                      <div className="flex flex-wrap gap-2 mb-2 max-h-40 overflow-y-auto p-2 bg-white border border-gray-300 rounded-md">
+                        {items.length === 0 ? (
+                          <p className="text-sm text-gray-500">No products available</p>
+                        ) : (
+                          items.map(item => (
+                            <button
+                              key={item.id}
+                              onClick={() => {
+                                const existing = packComponents.find(c => c.itemId === item.id);
+                                if (existing) {
+                                  setPackComponents(packComponents.map(c => 
+                                    c.itemId === item.id ? { ...c, quantity: c.quantity + 1 } : c
+                                  ));
+                                } else {
+                                  setPackComponents([...packComponents, {
+                                    itemId: item.id,
+                                    name: item.name,
+                                    quantity: 1
+                                  }]);
+                                }
+                              }}
+                              className="px-3 py-1 text-xs bg-green-100 text-green-800 rounded-full hover:bg-green-200"
+                            >
+                              {item.name}
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="mb-4">
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Pack Contents</label>
+                      {packComponents.length === 0 ? (
+                        <p className="text-sm text-gray-500">No components added yet</p>
+                      ) : (
+                        <ul className="space-y-2">
+                          {packComponents.map((component, index) => (
+                            <li key={index} className="flex items-center justify-between">
+                              <span className="text-sm">{component.name}</span>
+                              <div className="flex items-center">
+                                <input
+                                  type="number"
+                                  min="1"
+                                  value={component.quantity}
+                                  onChange={(e) => {
+                                    const newQuantity = parseInt(e.target.value) || 1;
+                                    setPackComponents(packComponents.map(c => 
+                                      c.itemId === component.itemId ? { ...c, quantity: newQuantity } : c
+                                    ));
+                                  }}
+                                  className="w-16 px-2 py-1 border border-gray-300 rounded-md text-center"
+                                />
+                                <button
+                                  onClick={() => {
+                                    setPackComponents(packComponents.filter(c => c.itemId !== component.itemId));
+                                  }}
+                                  className="ml-2 p-1 text-red-600 hover:text-red-800"
+                                >
+                                  Remove
+                                </button>
+                              </div>
+                            </li>
+                          ))}
+                        </ul>
                       )}
                     </div>
-                  </div>
 
-                  <div className="mb-4">
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Pack Contents</label>
-                    {packComponents.length === 0 ? (
-                      <p className="text-sm text-gray-500">No components added yet</p>
-                    ) : (
-                      <ul className="space-y-2">
-                        {packComponents.map((component, index) => (
-                          <li key={index} className="flex items-center justify-between">
-                            <span className="text-sm">{component.name}</span>
-                            <div className="flex items-center">
-                              <input
-                                type="number"
-                                min="1"
-                                value={component.quantity}
-                                onChange={(e) => {
-                                  const newQuantity = parseInt(e.target.value) || 1;
-                                  setPackComponents(packComponents.map(c => 
-                                    c.itemId === component.itemId ? { ...c, quantity: newQuantity } : c
-                                  ));
-                                }}
-                                className="w-16 px-2 py-1 border border-gray-300 rounded-md text-center"
-                              />
-                              <button
-                                onClick={() => {
-                                  setPackComponents(packComponents.filter(c => c.itemId !== component.itemId));
-                                }}
-                                className="ml-2 p-1 text-red-600 hover:text-red-800"
-                              >
-                                Remove
-                              </button>
-                            </div>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
+                    <div className="flex justify-end space-x-3">
+                      <button
+                        onClick={() => {
+                          setShowPackForm(false);
+                          setNewPackName('');
+                          setPackComponents([]);
+                        }}
+                        className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={addPack}
+                        disabled={!newPackName.trim() || packComponents.length === 0}
+                        className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+                      >
+                        Create Pack
+                      </button>
+                    </div>
                   </div>
+                )}
 
-                  <div className="flex justify-end space-x-3">
-                    <button
-                      onClick={() => {
-                        setShowPackForm(false);
-                        setNewPackName('');
-                        setPackComponents([]);
-                      }}
-                      className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={addPack}
-                      disabled={!newPackName.trim() || packComponents.length === 0}
-                      className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
-                    >
-                      Create Pack
-                    </button>
+                {filteredPacks.length === 0 ? (
+                  <div className="bg-white rounded-lg shadow-sm p-6 text-center text-gray-500">
+                    No packs found
                   </div>
-                </div>
-              )}
-
-              <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-200">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Pack Name</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Components</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Available</th>
-                      <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
-                    {packs.length === 0 ? (
-                      <tr>
-                        <td colSpan="4" className="px-6 py-4 text-center text-gray-500">
-                          No packs created yet
-                        </td>
-                      </tr>
-                    ) : (
-                      packs.map((pack) => (
-                        <tr key={pack.id} className="hover:bg-gray-50">
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <div className="text-sm font-medium text-gray-900">{pack.name}</div>
-                          </td>
-                          <td className="px-6 py-4">
-                            <div className="text-sm text-gray-900 space-y-1">
-                              {pack.components?.map((component, i) => (
-                                <div key={i}>{component.quantity} × {component.name}</div>
-                              ))}
-                            </div>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <div className="text-sm font-semibold text-gray-900">
-                              {calculatePackAvailability(pack)}
-                            </div>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                            <div className="flex justify-end space-x-2">
-                              <button
-                                onClick={() => updatePackStock(pack.id, -1)}
-                                className="px-3 py-1 bg-green-100 text-green-800 rounded hover:bg-green-200"
-                              >
-                                +1
-                              </button>
-                              <button
-                                onClick={() => updatePackStock(pack.id, 1)}
-                                disabled={calculatePackAvailability(pack) <= 0}
-                                className="px-3 py-1 bg-red-100 text-red-800 rounded hover:bg-red-200 disabled:opacity-50"
-                              >
-                                -1
-                              </button>
-                              <button
-                                onClick={() => deletePack(pack.id)}
-                                className="px-3 py-1 bg-gray-100 text-gray-800 rounded hover:bg-gray-200"
-                              >
-                                Delete
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {filteredPacks.map((pack) => {
+                      const available = calculatePackAvailability(pack);
+                      return (
+                        <div key={pack.id} className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 card-transition">
+                          <div className="flex justify-between items-start mb-2">
+                            <h3 className="text-lg font-medium">
+                              {highlightSearch(pack.name)}
+                            </h3>
+                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                              available > 5 ? 'bg-green-100 text-green-800' :
+                              available > 0 ? 'bg-yellow-100 text-yellow-800' :
+                              'bg-red-100 text-red-800'
+                            }`}>
+                              {available} available
+                            </span>
+                          </div>
+                          
+                          <div className="mb-4">
+                            <h4 className="text-sm font-medium text-gray-500 mb-1">Components:</h4>
+                            <ul className="space-y-1">
+                              {pack.components?.map((component, i) => {
+                                const item = items.find(i => i.id === component.itemId);
+                                return (
+                                  <li key={i} className="text-sm">
+                                    {component.quantity} × {item ? highlightSearch(item.name) : 'Unknown Item'}
+                                  </li>
+                                );
+                              })}
+                            </ul>
+                          </div>
+                          
+                          <div className="flex justify-between">
+                            <button
+                              onClick={() => updatePackStock(pack.id, -1)}
+                              className="px-3 py-1 bg-green-100 text-green-800 rounded hover:bg-green-200"
+                            >
+                              +1
+                            </button>
+                            <button
+                              onClick={() => updatePackStock(pack.id, 1)}
+                              disabled={available <= 0}
+                              className="px-3 py-1 bg-red-100 text-red-800 rounded hover:bg-red-200 disabled:opacity-50"
+                            >
+                              -1
+                            </button>
+                            <button
+                              onClick={() => deletePack(pack.id)}
+                              className="px-3 py-1 bg-gray-100 text-gray-800 rounded hover:bg-gray-200"
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
-            </div>
+            )}
           </div>
         </div>
       );
