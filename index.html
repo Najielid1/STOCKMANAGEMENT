@@ -21,6 +21,12 @@
     .search-highlight {
       background-color: #fef08a;
     }
+    .bento-box {
+      transition: all 0.3s ease;
+    }
+    .bento-box:hover {
+      transform: scale(1.02);
+    }
   </style>
 </head>
 <body>
@@ -83,6 +89,13 @@
         
         fetchData();
       }, []);
+
+      // Calculate dashboard metrics
+      const totalProducts = items.length;
+      const totalPacks = packs.length;
+      const totalStockValue = items.reduce((sum, item) => sum + (item.stock || 0), 0);
+      const lowStockItems = items.filter(item => item.stock < 5).length;
+      const totalAvailablePacks = packs.reduce((sum, pack) => sum + calculatePackAvailability(pack), 0);
 
       // Item operations
       const addItem = async () => {
@@ -270,6 +283,37 @@
                 </div>
               </div>
             )}
+
+            {/* Bento Box Dashboard */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+              <div className="bento-box bg-blue-50 rounded-xl p-4 shadow-sm border border-blue-100">
+                <h3 className="text-sm font-medium text-blue-800 mb-1">Total Products</h3>
+                <p className="text-2xl font-bold text-blue-900">{totalProducts}</p>
+              </div>
+              <div className="bento-box bg-green-50 rounded-xl p-4 shadow-sm border border-green-100">
+                <h3 className="text-sm font-medium text-green-800 mb-1">Total Stock</h3>
+                <p className="text-2xl font-bold text-green-900">{totalStockValue}</p>
+              </div>
+              <div className="bento-box bg-purple-50 rounded-xl p-4 shadow-sm border border-purple-100">
+                <h3 className="text-sm font-medium text-purple-800 mb-1">Available Packs</h3>
+                <p className="text-2xl font-bold text-purple-900">{totalAvailablePacks}</p>
+              </div>
+              <div className={`bento-box rounded-xl p-4 shadow-sm border ${
+                lowStockItems > 0 ? 'bg-amber-50 border-amber-200' : 'bg-emerald-50 border-emerald-100'
+              }`}>
+                <h3 className="text-sm font-medium mb-1">
+                  {lowStockItems > 0 ? 'Low Stock Items' : 'Stock Levels Good'}
+                </h3>
+                <p className={`text-2xl font-bold ${
+                  lowStockItems > 0 ? 'text-amber-800' : 'text-emerald-800'
+                }`}>
+                  {lowStockItems > 0 ? `${lowStockItems} items` : 'All good'}
+                </p>
+                {lowStockItems > 0 && (
+                  <p className="text-xs text-amber-600 mt-1">Items below 5 in stock</p>
+                )}
+              </div>
+            </div>
 
             {/* Add Item Form */}
             <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
@@ -468,18 +512,48 @@
                         </div>
                         
                         <div className="flex flex-col space-y-2">
-                          {adjustmentPackId === pack.id ? (
+                          <div className="flex justify-between">
+                            <button
+                              onClick={() => updatePackStock(pack.id, -1)}
+                              className="px-2 py-1 text-xs bg-green-100 text-green-800 rounded hover:bg-green-200"
+                            >
+                              +1
+                            </button>
+                            <button
+                              onClick={() => updatePackStock(pack.id, 1)}
+                              disabled={available <= 0}
+                              className="px-2 py-1 text-xs bg-red-100 text-red-800 rounded hover:bg-red-200 disabled:opacity-50"
+                            >
+                              -1
+                            </button>
+                            <button
+                              onClick={() => {
+                                setAdjustmentPackId(pack.id);
+                                setAdjustmentValue('1');
+                              }}
+                              className="px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded hover:bg-blue-200"
+                            >
+                              Add Custom
+                            </button>
+                            <button
+                              onClick={() => deletePack(pack.id)}
+                              className="px-2 py-1 text-xs bg-gray-100 text-gray-800 rounded hover:bg-gray-200"
+                            >
+                              Delete
+                            </button>
+                          </div>
+                          {adjustmentPackId === pack.id && (
                             <div className="flex items-center space-x-2">
                               <input
                                 type="number"
                                 value={adjustmentValue}
                                 onChange={(e) => setAdjustmentValue(e.target.value)}
-                                className="flex-1 px-2 py-1 border rounded"
+                                className="flex-1 px-2 py-1 text-xs border rounded"
                                 placeholder="Quantity"
                               />
                               <button
                                 onClick={() => updatePackStock(pack.id, parseInt(adjustmentValue) || 0)}
-                                className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700"
+                                className="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700"
                               >
                                 Apply
                               </button>
@@ -488,37 +562,9 @@
                                   setAdjustmentPackId(null);
                                   setAdjustmentValue('');
                                 }}
-                                className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300"
+                                className="px-2 py-1 text-xs bg-gray-200 rounded hover:bg-gray-300"
                               >
                                 Cancel
-                              </button>
-                            </div>
-                          ) : (
-                            <div className="flex justify-between">
-                              <button
-                                onClick={() => {
-                                  setAdjustmentPackId(pack.id);
-                                  setAdjustmentValue('1');
-                                }}
-                                className="px-3 py-1 bg-green-100 text-green-800 rounded hover:bg-green-200"
-                              >
-                                Add Stock
-                              </button>
-                              <button
-                                onClick={() => {
-                                  setAdjustmentPackId(pack.id);
-                                  setAdjustmentValue('-1');
-                                }}
-                                disabled={available <= 0}
-                                className="px-3 py-1 bg-red-100 text-red-800 rounded hover:bg-red-200 disabled:opacity-50"
-                              >
-                                Remove Stock
-                              </button>
-                              <button
-                                onClick={() => deletePack(pack.id)}
-                                className="px-3 py-1 bg-gray-100 text-gray-800 rounded hover:bg-gray-200"
-                              >
-                                Delete
                               </button>
                             </div>
                           )}
@@ -545,21 +591,55 @@
                         <h3 className="text-lg font-medium">
                           {highlightSearch(item.name)}
                         </h3>
-                        <span className="text-xl font-bold">{item.stock}</span>
+                        <span className={`text-xl font-bold ${
+                          item.stock < 5 ? 'text-amber-600' : 'text-gray-800'
+                        }`}>
+                          {item.stock}
+                        </span>
                       </div>
                       <div className="mt-4 flex flex-col space-y-2">
-                        {adjustmentItemId === item.id ? (
+                        <div className="flex justify-between">
+                          <button
+                            onClick={() => updateStock(item.id, 1)}
+                            className="px-2 py-1 text-xs bg-green-100 text-green-800 rounded hover:bg-green-200"
+                          >
+                            +1
+                          </button>
+                          <button
+                            onClick={() => updateStock(item.id, -1)}
+                            disabled={item.stock <= 0}
+                            className="px-2 py-1 text-xs bg-red-100 text-red-800 rounded hover:bg-red-200 disabled:opacity-50"
+                          >
+                            -1
+                          </button>
+                          <button
+                            onClick={() => {
+                              setAdjustmentItemId(item.id);
+                              setAdjustmentValue('1');
+                            }}
+                            className="px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded hover:bg-blue-200"
+                          >
+                            Add Custom
+                          </button>
+                          <button
+                            onClick={() => deleteItem(item.id)}
+                            className="px-2 py-1 text-xs bg-gray-100 text-gray-800 rounded hover:bg-gray-200"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                        {adjustmentItemId === item.id && (
                           <div className="flex items-center space-x-2">
                             <input
                               type="number"
                               value={adjustmentValue}
                               onChange={(e) => setAdjustmentValue(e.target.value)}
-                              className="flex-1 px-2 py-1 border rounded"
+                              className="flex-1 px-2 py-1 text-xs border rounded"
                               placeholder="Quantity"
                             />
                             <button
                               onClick={() => updateStock(item.id, parseInt(adjustmentValue) || 0)}
-                              className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700"
+                              className="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700"
                             >
                               Apply
                             </button>
@@ -568,37 +648,9 @@
                                 setAdjustmentItemId(null);
                                 setAdjustmentValue('');
                               }}
-                              className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300"
+                              className="px-2 py-1 text-xs bg-gray-200 rounded hover:bg-gray-300"
                             >
                               Cancel
-                            </button>
-                          </div>
-                        ) : (
-                          <div className="flex justify-between">
-                            <button
-                              onClick={() => {
-                                setAdjustmentItemId(item.id);
-                                setAdjustmentValue('1');
-                              }}
-                              className="px-3 py-1 bg-green-100 text-green-800 rounded hover:bg-green-200"
-                            >
-                              Add Stock
-                            </button>
-                            <button
-                              onClick={() => {
-                                setAdjustmentItemId(item.id);
-                                setAdjustmentValue('-1');
-                              }}
-                              disabled={item.stock <= 0}
-                              className="px-3 py-1 bg-red-100 text-red-800 rounded hover:bg-red-200 disabled:opacity-50"
-                            >
-                              Remove Stock
-                            </button>
-                            <button
-                              onClick={() => deleteItem(item.id)}
-                              className="px-3 py-1 bg-gray-100 text-gray-800 rounded hover:bg-gray-200"
-                            >
-                              Delete
                             </button>
                           </div>
                         )}
