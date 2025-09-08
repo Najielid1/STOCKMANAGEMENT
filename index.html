@@ -45,8 +45,8 @@
     const db = firebase.firestore();
     
     // --- Authentication Logic ---
-    // Correct hash for "nahahi"
-    const CORRECT_HASH = '60b457b989fe737632616a6142e05621a296d357731f281a8b3074c3e80a7114';
+    // Correct hash for "nahahi" provided by user
+    const CORRECT_HASH = '804c57db53d2861de6f3d10e3dfe076889acc39fe3ecb68e56c00eb92bada85f';
 
     async function sha256(message) {
         const msgBuffer = new TextEncoder().encode(message);
