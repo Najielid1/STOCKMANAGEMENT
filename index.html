@@ -64,7 +64,8 @@
             setIsVerifying(true);
             setError('');
             try {
-                const inputHash = await sha256(password);
+                // *** FIX: Trim whitespace from password before hashing ***
+                const inputHash = await sha256(password.trim());
                 if (inputHash === CORRECT_HASH) {
                     onLoginSuccess();
                 } else {
