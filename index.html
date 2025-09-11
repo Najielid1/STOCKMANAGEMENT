@@ -171,12 +171,50 @@
             </div>
         );
     };
+
+    const InvoiceViewer = ({ invoices, onClose }) => {
+        const [expandedId, setExpandedId] = useState(null);
+        return (
+            <div className="modal-backdrop" onClick={onClose}>
+                <div className="modal-content bg-white rounded-lg shadow-xl w-11/12 max-w-4xl h-5/6 flex flex-col" onClick={e => e.stopPropagation()}>
+                    <div className="p-4 border-b"><h2 className="text-xl font-bold">Past Invoices</h2></div>
+                    <div className="p-4 flex-grow overflow-y-auto bg-gray-50">
+                        {invoices.length === 0 ? <p>No invoices found.</p> :
+                            <ul className="space-y-2">
+                                {invoices.map(inv => (
+                                    <li key={inv.id} className="bg-white p-3 rounded-md shadow-sm cursor-pointer" onClick={() => setExpandedId(expandedId === inv.id ? null : inv.id)}>
+                                        <div className="grid grid-cols-3 items-center">
+                                            <span className="font-bold">{inv.invoiceNumber}</span>
+                                            <span className="text-sm text-gray-600">{inv.createdAt ? new Date(inv.createdAt.toDate()).toLocaleDateString() : ''}</span>
+                                            <span className="font-semibold text-right">{inv.grandTotal.toFixed(2)} DH</span>
+                                        </div>
+                                        {expandedId === inv.id && (
+                                            <div className="mt-2 pt-2 border-t">
+                                                {inv.lineItems.map((line, idx) => (
+                                                    <div key={idx} className="grid grid-cols-3 text-sm text-gray-700">
+                                                        <span>{line.name}</span>
+                                                        <span className="text-center">{line.quantity} x {line.cost.toFixed(2)} DH</span>
+                                                        <span className="text-right">{(line.quantity * line.cost).toFixed(2)} DH</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </li>
+                                ))}
+                            </ul>
+                        }
+                    </div>
+                    <div className="p-4 border-t text-right"><button onClick={onClose} className="px-4 py-2 bg-gray-200 rounded-md">Close</button></div>
+                </div>
+            </div>
+        );
+    };
     
     // --- Main Application Component ---
     function StockInventoryApp() {
       const [items, setItems] = useState([]); const [packs, setPacks] = useState([]); const [ledger, setLedger] = useState([]); const [invoices, setInvoices] = useState([]);
       const [loading, setLoading] = useState(true); const [error, setError] = useState(null); const [searchQuery, setSearchQuery] = useState(''); const [editing, setEditing] = useState({ id: null, text: '' });
-      const [isLedgerVisible, setIsLedgerVisible] = useState(false); const [isInvoiceCreatorVisible, setIsInvoiceCreatorVisible] = useState(false);
+      const [isLedgerVisible, setIsLedgerVisible] = useState(false); const [isInvoiceCreatorVisible, setIsInvoiceCreatorVisible] = useState(false); const [isInvoiceViewerVisible, setIsInvoiceViewerVisible] = useState(false);
       const [isSaveSessionModalVisible, setIsSaveSessionModalVisible] = useState(false); const [showStartSessionPrompt, setShowStartSessionPrompt] = useState(false);
       const [newItemName, setNewItemName] = useState(''); const [newItemStock, setNewItemStock] = useState(''); const [newItemImageUrl, setNewItemImageUrl] = useState('');
       const [showPackForm, setShowPackForm] = useState(false); const [newPackName, setNewPackName] = useState(''); const [packComponents, setPackComponents] = useState([]);
@@ -187,7 +225,7 @@
         const unsubItems = db.collection('items').orderBy("createdAt", "desc").onSnapshot(s => setItems(s.docs.map(d => ({ id: d.id, ...d.data() }))), e => setError(`Items Error: ${e.message}`));
         const unsubPacks = db.collection('packs').orderBy("createdAt", "desc").onSnapshot(s => setPacks(s.docs.map(d => ({ id: d.id, ...d.data() }))), e => setError(`Packs Error: ${e.message}`));
         const unsubLedger = db.collection('ledger').orderBy("sessionEndedAt", "desc").onSnapshot(s => setLedger(s.docs.map(d => ({ id: d.id, ...d.data() }))), e => setError(`Ledger Error: ${e.message}`));
-        const unsubInvoices = db.collection('invoices').orderBy("createdAt", "desc").onSnapshot(s => setInvoices(s.docs.map(d => ({ id: d.id, ...d.data() }))), e => setError(`Invoices Error: ${e.message}`));
+        const unsubInvoices = db.collection('invoices').orderBy("invoiceNumber", "desc").onSnapshot(s => setInvoices(s.docs.map(d => ({ id: d.id, ...d.data() }))), e => setError(`Invoices Error: ${e.message}`));
         setTimeout(() => setLoading(false), 700);
         return () => { unsubItems(); unsubPacks(); unsubLedger(); unsubInvoices(); };
       }, []);
@@ -201,9 +239,7 @@
                 existing.totalChange += change.totalChange;
                 existing.details = `${change.type === 'UPDATE_STOCK' ? 'Stock' : 'Units'} changed from ${existing.initialStock} to ${existing.initialStock + existing.totalChange} (${existing.totalChange > 0 ? '+' : ''}${existing.totalChange})`;
                 return updatedChanges;
-            } else {
-                return [...prev, change];
-            }
+            } else { return [...prev, change]; }
         });
       };
 
@@ -281,16 +317,34 @@
       };
       
       const handleFinalizeInvoice = async (invoiceData, isCapturing) => {
+          const counterRef = db.collection('counters').doc('invoiceCounter');
+          let newInvoiceNumber;
+
+          await db.runTransaction(async (transaction) => {
+              const counterDoc = await transaction.get(counterRef);
+              if (!counterDoc.exists) {
+                  newInvoiceNumber = 1;
+                  transaction.set(counterRef, { currentNumber: newInvoiceNumber });
+              } else {
+                  newInvoiceNumber = counterDoc.data().currentNumber + 1;
+                  transaction.update(counterRef, { currentNumber: newInvoiceNumber });
+              }
+          });
+
+          const formattedInvoiceNumber = `INV-${String(newInvoiceNumber).padStart(3, '0')}`;
+          const finalInvoiceData = { ...invoiceData, invoiceNumber: formattedInvoiceNumber };
+
           const batch = db.batch();
-          invoiceData.lineItems.forEach(item => {
+          finalInvoiceData.lineItems.forEach(item => {
               const itemRef = db.collection('items').doc(item.id);
               batch.update(itemRef, { stock: firebase.firestore.FieldValue.increment(item.quantity) });
           });
           const invoiceRef = db.collection('invoices').doc();
-          batch.set(invoiceRef, invoiceData);
+          batch.set(invoiceRef, finalInvoiceData);
           await batch.commit();
+
           setIsInvoiceCreatorVisible(false);
-          if(isCapturing) return {type: 'CREATE_INVOICE', name: `Invoice #${invoiceRef.id.substring(0,6)}`, targetId: invoiceRef.id, details: `Received ${invoiceData.lineItems.length} items. Total: ${invoiceData.grandTotal.toFixed(2)} DH`};
+          if(isCapturing) return {type: 'CREATE_INVOICE', name: `Invoice ${formattedInvoiceNumber}`, targetId: invoiceRef.id, details: `Received ${finalInvoiceData.lineItems.length} items. Total: ${finalInvoiceData.grandTotal.toFixed(2)} DH`};
       };
 
       const handleStartSession = () => {
@@ -352,11 +406,12 @@
           {isSaveSessionModalVisible && <div className="modal-backdrop"><div className="modal-content bg-white rounded-lg shadow-xl w-11/12 max-w-lg"><div className="p-6"><h2 className="text-xl font-bold mb-4">End Session</h2><p className="mb-4">You've made {sessionChanges.length} change(s). Add an optional note to summarize.</p><textarea value={sessionNote} onChange={e => setSessionNote(e.target.value)} placeholder="e.g., Weekly stock intake..." className="w-full p-2 border rounded-md" rows="3"></textarea></div><div className="px-6 py-4 bg-gray-50 flex justify-between"><button onClick={handleDiscardSession} className="px-4 py-2 bg-red-100 text-red-700 rounded-md">Discard & Revert</button><div className="flex gap-3"><button onClick={() => setIsSaveSessionModalVisible(false)} className="px-4 py-2 bg-gray-200 rounded-md">Cancel</button><button onClick={handleSaveSession} className="px-4 py-2 bg-blue-600 text-white rounded-md">Save to Ledger</button></div></div></div></div>}
           {showStartSessionPrompt && <div className="modal-backdrop"><div className="modal-content bg-white rounded-lg shadow-xl w-11/12 max-w-sm text-center p-6"><h2 className="text-xl font-bold mb-4">Session Required</h2><p className="mb-6">Please start a session before making any changes.</p><div className="flex gap-4"><button onClick={() => setShowStartSessionPrompt(false)} className="w-full px-4 py-2 bg-gray-200 rounded-md">Cancel</button><button onClick={() => { handleStartSession(); setShowStartSessionPrompt(false); }} className="w-full px-4 py-2 bg-blue-600 text-white rounded-md">Start Session</button></div></div></div>}
           {isInvoiceCreatorVisible && <InvoiceCreator items={items} onFinalize={withLedger(handleFinalizeInvoice)} onClose={() => setIsInvoiceCreatorVisible(false)} />}
+          {isInvoiceViewerVisible && <InvoiceViewer invoices={invoices} onClose={() => setIsInvoiceViewerVisible(false)} />}
           
           <div className="max-w-6xl mx-auto">
             {isSessionActive && <div className="sticky-banner bg-blue-600 text-white rounded-lg p-4 mb-6 flex justify-between items-center shadow-lg"><div><h3 className="font-bold text-lg">Session in Progress</h3><p>{sessionChanges.length} unique change(s) recorded.</p></div><button onClick={handleAttemptEndSession} className="bg-white text-blue-600 font-bold px-4 py-2 rounded-md hover:bg-blue-100">End Session</button></div>}
             
-            <div className="bg-white rounded-lg shadow-md p-6 mb-6"><div className="flex flex-wrap justify-between items-center gap-4"><div><h1 className="text-2xl font-bold text-gray-800">Stock Inventory Manager</h1></div><div className="flex gap-2">{!isSessionActive && <button onClick={handleStartSession} className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">Start Session</button>}<button onClick={()=>withLedger(()=>setIsInvoiceCreatorVisible(true))()} className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700">Receive Stock</button><button onClick={() => setIsLedgerVisible(true)} className="px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700">View Ledger</button></div></div></div>
+            <div className="bg-white rounded-lg shadow-md p-6 mb-6"><div className="flex flex-wrap justify-between items-center gap-4"><div><h1 className="text-2xl font-bold text-gray-800">Stock Inventory Manager</h1></div><div className="flex flex-wrap gap-2">{!isSessionActive && <button onClick={handleStartSession} className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">Start Session</button>}<button onClick={()=>withLedger(()=>setIsInvoiceCreatorVisible(true))()} className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700">Receive Stock</button><button onClick={() => setIsInvoiceViewerVisible(true)} className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700">View Invoices</button><button onClick={() => setIsLedgerVisible(true)} className="px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700">View Ledger</button></div></div></div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6"><div className="bento-box bg-blue-50 rounded-xl p-4 shadow-sm border"><h3 className="text-sm font-medium text-blue-800 mb-1">Total Products</h3><p className="text-2xl font-bold text-blue-900">{items.length}</p></div><div className="bento-box bg-green-50 rounded-xl p-4 shadow-sm border"><h3 className="text-sm font-medium text-green-800 mb-1">Total Stock</h3><p className="text-2xl font-bold text-green-900">{dashboardMetrics.totalStockValue}</p></div><div className="bento-box bg-purple-50 rounded-xl p-4 shadow-sm border"><h3 className="text-sm font-medium text-purple-800 mb-1">Available Packs</h3><p className="text-2xl font-bold text-purple-900">{dashboardMetrics.totalAvailablePacks}</p></div><div className={`bento-box rounded-xl p-4 shadow-sm border ${dashboardMetrics.lowStockItems > 0 ? 'bg-amber-50' : 'bg-emerald-50'}`}><h3 className="text-sm font-medium mb-1">{dashboardMetrics.lowStockItems > 0 ? 'Low Stock Items' : 'Stock Levels Good'}</h3><p className={`text-2xl font-bold ${dashboardMetrics.lowStockItems > 0 ? 'text-amber-800' : 'text-emerald-800'}`}>{dashboardMetrics.lowStockItems > 0 ? `${dashboardMetrics.lowStockItems} items` : 'All good'}</p></div></div>
             <div className="bg-white rounded-lg shadow-sm p-6 mb-6"><h2 className="text-lg font-semibold mb-4">Add New Product</h2><div className="grid grid-cols-1 sm:grid-cols-3 gap-3"><input type="text" placeholder="Product name" value={newItemName} onChange={e=>setNewItemName(e.target.value)} className="sm:col-span-2 px-3 py-2 border rounded-md" /><input type="number" placeholder="Initial stock" value={newItemStock} onChange={e=>setNewItemStock(e.target.value)} className="px-3 py-2 border rounded-md" /></div><div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-3"><input type="url" placeholder="Image URL (optional)" value={newItemImageUrl} onChange={e=>setNewItemImageUrl(e.target.value)} className="sm:col-span-2 px-3 py-2 border rounded-md" /><button onClick={()=>withLedger(addItem)()} disabled={!isSessionActive && !newItemName.trim()} className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-300">Add Product</button></div></div>
             <div className="bg-white rounded-lg shadow-sm p-4 mb-6"><input type="search" placeholder="Search products or packs..." value={searchQuery} onChange={e=>setSearchQuery(e.target.value)} className="w-full px-3 py-2 border rounded-md"/></div>
