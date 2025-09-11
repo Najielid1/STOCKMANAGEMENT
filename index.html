@@ -105,6 +105,41 @@
         );
     }
 
+    // --- Reusable Components ---
+    const ProductImage = ({ item, handleEditImage }) => {
+        const [imgSrc, setImgSrc] = useState(item.imageUrl || '');
+        const [hasError, setHasError] = useState(false);
+
+        useEffect(() => {
+            setImgSrc(item.imageUrl || '');
+            setHasError(false);
+        }, [item.imageUrl]);
+
+        const onError = () => {
+            setHasError(true);
+        };
+        
+        return (
+            <div className="group relative w-full h-40 bg-gray-200 rounded-t-lg overflow-hidden">
+                {!hasError && imgSrc ? (
+                    <img src={imgSrc} onError={onError} className="w-full h-full object-cover" alt={item.name} />
+                ) : (
+                    <div className="w-full h-full flex flex-col items-center justify-center text-gray-500">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                        <span className="text-xs mt-1">{item.name}</span>
+                    </div>
+                )}
+                <button
+                    onClick={() => handleEditImage(item.id, item.imageUrl)}
+                    className="absolute top-2 right-2 p-1.5 bg-black bg-opacity-50 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                    title="Edit Image"
+                >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.5L14.732 3.732z" /></svg>
+                </button>
+            </div>
+        );
+    };
+
     // --- Main Application Component ---
     function StockInventoryApp() {
       // Data States
@@ -124,6 +159,7 @@
       // Form States
       const [newItemName, setNewItemName] = useState('');
       const [newItemStock, setNewItemStock] = useState('');
+      const [newItemImageUrl, setNewItemImageUrl] = useState('');
       const [showPackForm, setShowPackForm] = useState(false);
       const [newPackName, setNewPackName] = useState('');
       const [packComponents, setPackComponents] = useState([]);
@@ -150,9 +186,7 @@
       // --- Ledger Consolidation Logic ---
       const logChange = (change) => {
         setSessionChanges(prev => {
-            if (change.type !== 'UPDATE_STOCK' && change.type !== 'ADJUST_PACK_STOCK') {
-                return [...prev, change];
-            }
+            if (change.type !== 'UPDATE_STOCK' && change.type !== 'ADJUST_PACK_STOCK') return [...prev, change];
             const existingChangeIndex = prev.findIndex(c => c.type === change.type && c.targetId === change.targetId);
             if (existingChangeIndex > -1) {
                 const updatedChanges = [...prev];
@@ -180,16 +214,17 @@
       const addItem = async (isCapturing) => {
         if (!newItemName.trim()) return;
         const name = newItemName.trim(); const stock = parseInt(newItemStock) || 0;
-        const docRef = await db.collection('items').add({ name, stock, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
-        setNewItemName(''); setNewItemStock('');
+        const docRef = await db.collection('items').add({ name, stock, imageUrl: newItemImageUrl.trim(), createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+        setNewItemName(''); setNewItemStock(''); setNewItemImageUrl('');
         if (isCapturing) return { type: 'CREATE_ITEM', name, targetId: docRef.id, details: `Created with stock of ${stock}` };
       };
 
-      const updateItemName = async (id, newName, isCapturing) => {
-        const item = items.find(i => i.id === id); if (!item || !newName.trim()) return;
-        const oldName = item.name;
-        await db.collection('items').doc(id).update({ name: newName.trim() }); setEditing({ id: null, text: '' });
-        if (isCapturing) return { type: 'UPDATE_ITEM', name: newName.trim(), targetId: id, details: `Name changed from '${oldName}' to '${newName.trim()}'` };
+      const updateItem = async (id, field, value, isCapturing) => {
+          const item = items.find(i => i.id === id); if (!item) return;
+          const oldName = item.name;
+          await db.collection('items').doc(id).update({ [field]: value });
+          setEditing({ id: null, text: '' });
+          if (isCapturing) return { type: 'UPDATE_ITEM', name: field === 'name' ? value : item.name, targetId: id, details: `${field} changed from '${item[field]}' to '${value}'` };
       };
       
       const updateStock = async (id, change, isCapturing) => {
@@ -239,78 +274,44 @@
         await db.collection('packs').doc(id).delete();
         if(isCapturing) return { type: 'DELETE_PACK', name: pack.name, targetId: id, details: 'Pack removed' };
       };
+      
+      const handleEditImage = async (id, currentUrl) => {
+          const newUrl = prompt("Enter new image URL:", currentUrl || "");
+          if (newUrl !== null) { // prompt returns null if cancelled
+              await db.collection('items').doc(id).update({ imageUrl: newUrl.trim() });
+          }
+      };
+
 
       // --- Session Management & Calculations ---
       const handleStartSession = () => {
-        // Create a deep copy for the snapshot
-        setSessionSnapshot({
-            items: JSON.parse(JSON.stringify(items)),
-            packs: JSON.parse(JSON.stringify(packs)),
-        });
+        setSessionSnapshot({ items: JSON.parse(JSON.stringify(items)), packs: JSON.parse(JSON.stringify(packs)) });
         setIsSessionActive(true);
         setSessionChanges([]);
       };
       
       const handleDiscardSession = async () => {
-          if (!sessionSnapshot) {
-              resetSession();
-              return;
-          }
-          
+          if (!sessionSnapshot) { resetSession(); return; }
           try {
               const batch = db.batch();
-
-              // Get current items and packs from state
               const currentItems = new Map(items.map(i => [i.id, i]));
               const currentPacks = new Map(packs.map(p => [p.id, p]));
-
-              // Items to restore or update
-              sessionSnapshot.items.forEach(itemSnapshot => {
-                  const itemRef = db.collection('items').doc(itemSnapshot.id);
-                  batch.set(itemRef, itemSnapshot);
-                  currentItems.delete(itemSnapshot.id);
-              });
-              
-              // Packs to restore or update
-              sessionSnapshot.packs.forEach(packSnapshot => {
-                  const packRef = db.collection('packs').doc(packSnapshot.id);
-                  batch.set(packRef, packSnapshot);
-                  currentPacks.delete(packSnapshot.id);
-              });
-
-              // Items and packs created during the session that need to be deleted
+              sessionSnapshot.items.forEach(itemSnapshot => { batch.set(db.collection('items').doc(itemSnapshot.id), itemSnapshot); currentItems.delete(itemSnapshot.id); });
+              sessionSnapshot.packs.forEach(packSnapshot => { batch.set(db.collection('packs').doc(packSnapshot.id), packSnapshot); currentPacks.delete(packSnapshot.id); });
               currentItems.forEach((_, id) => batch.delete(db.collection('items').doc(id)));
               currentPacks.forEach((_, id) => batch.delete(db.collection('packs').doc(id)));
-
               await batch.commit();
-          } catch(e) {
-              setError("Failed to revert changes. Please refresh the page.");
-          } finally {
-              resetSession();
-          }
+          } catch(e) { setError("Failed to revert changes. Please refresh."); } 
+          finally { resetSession(); }
       };
       
       const resetSession = () => {
-          setIsSessionActive(false);
-          setSessionChanges([]);
-          setSessionNote("");
-          setIsSaveSessionModalVisible(false);
-          setSessionSnapshot(null);
+          setIsSessionActive(false); setSessionChanges([]); setSessionNote(""); setIsSaveSessionModalVisible(false); setSessionSnapshot(null);
       };
 
-      const handleAttemptEndSession = () => {
-        if (sessionChanges.length === 0) {
-            resetSession();
-        } else {
-            setIsSaveSessionModalVisible(true);
-        }
-      };
-
+      const handleAttemptEndSession = () => { sessionChanges.length === 0 ? resetSession() : setIsSaveSessionModalVisible(true); };
       const handleSaveSession = async () => {
-        if (sessionChanges.length === 0) {
-            resetSession();
-            return;
-        }
+        if (sessionChanges.length === 0) { resetSession(); return; }
         await db.collection('ledger').add({ sessionEndedAt: firebase.firestore.FieldValue.serverTimestamp(), note: sessionNote || "No summary provided.", changes: sessionChanges });
         resetSession();
       };
@@ -337,17 +338,17 @@
 
       return (
         <div className="min-h-screen bg-gray-50 p-4 font-sans">
-          {/* Modals */}
           {isLedgerVisible && <div className="modal-backdrop" onClick={() => setIsLedgerVisible(false)}><div className="modal-content bg-white rounded-lg shadow-xl w-11/12 max-w-4xl h-3/4 flex flex-col" onClick={e => e.stopPropagation()}><div className="p-4 border-b"><h2 className="text-xl font-bold">Operations Ledger</h2></div><div className="p-4 flex-grow overflow-y-auto bg-gray-50">{ledger.length === 0 ? <p>No ledger entries yet.</p> : <ul className="space-y-4">{ledger.map(entry => (<li key={entry.id} className="bg-white p-4 rounded-lg shadow"><div className="flex justify-between items-center mb-2"><p className="font-bold text-lg">{entry.note}</p><p className="text-sm text-gray-500">{entry.sessionEndedAt ? new Date(entry.sessionEndedAt.toDate()).toLocaleString() : ''}</p></div><ul className="space-y-1 pl-4 border-l-2">{entry.changes.map((change, index) => (<li key={index} className="text-sm text-gray-700"><span className="font-semibold">{change.name}</span>: {change.details}</li>))}</ul></li>))}</ul>}</div><div className="p-4 border-t text-right"><button onClick={() => setIsLedgerVisible(false)} className="px-4 py-2 bg-gray-200 rounded-md">Close</button></div></div></div>}
           {isSaveSessionModalVisible && <div className="modal-backdrop"><div className="modal-content bg-white rounded-lg shadow-xl w-11/12 max-w-lg"><div className="p-6"><h2 className="text-xl font-bold mb-4">End Session</h2><p className="mb-4">You've made {sessionChanges.length} change(s). Add an optional note to summarize.</p><textarea value={sessionNote} onChange={e => setSessionNote(e.target.value)} placeholder="e.g., Weekly stock intake..." className="w-full p-2 border rounded-md" rows="3"></textarea></div><div className="px-6 py-4 bg-gray-50 flex justify-between"><button onClick={handleDiscardSession} className="px-4 py-2 bg-red-100 text-red-700 rounded-md">Discard & Revert</button><div className="flex gap-3"><button onClick={() => setIsSaveSessionModalVisible(false)} className="px-4 py-2 bg-gray-200 rounded-md">Cancel</button><button onClick={handleSaveSession} className="px-4 py-2 bg-blue-600 text-white rounded-md">Save to Ledger</button></div></div></div></div>}
-          {showStartSessionPrompt && <div className="modal-backdrop"><div className="modal-content bg-white rounded-lg shadow-xl w-11/12 max-w-sm text-center p-6"><h2 className="text-xl font-bold mb-4">Session Required</h2><p className="mb-6">Please start a session before making any changes to the inventory.</p><div className="flex gap-4"><button onClick={() => setShowStartSessionPrompt(false)} className="w-full px-4 py-2 bg-gray-200 rounded-md">Cancel</button><button onClick={() => { handleStartSession(); setShowStartSessionPrompt(false); }} className="w-full px-4 py-2 bg-blue-600 text-white rounded-md">Start Session</button></div></div></div>}
+          {showStartSessionPrompt && <div className="modal-backdrop"><div className="modal-content bg-white rounded-lg shadow-xl w-11/12 max-w-sm text-center p-6"><h2 className="text-xl font-bold mb-4">Session Required</h2><p className="mb-6">Please start a session before making any changes.</p><div className="flex gap-4"><button onClick={() => setShowStartSessionPrompt(false)} className="w-full px-4 py-2 bg-gray-200 rounded-md">Cancel</button><button onClick={() => { handleStartSession(); setShowStartSessionPrompt(false); }} className="w-full px-4 py-2 bg-blue-600 text-white rounded-md">Start Session</button></div></div></div>}
           
           <div className="max-w-6xl mx-auto">
             {isSessionActive && <div className="sticky-banner bg-blue-600 text-white rounded-lg p-4 mb-6 flex justify-between items-center shadow-lg"><div><h3 className="font-bold text-lg">Session in Progress</h3><p>{sessionChanges.length} unique change(s) recorded.</p></div><button onClick={handleAttemptEndSession} className="bg-white text-blue-600 font-bold px-4 py-2 rounded-md hover:bg-blue-100">End Session</button></div>}
             
             <div className="bg-white rounded-lg shadow-md p-6 mb-6"><div className="flex flex-wrap justify-between items-center gap-4"><div><h1 className="text-2xl font-bold text-gray-800">Stock Inventory Manager</h1></div><div className="flex gap-2">{!isSessionActive && <button onClick={handleStartSession} className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">Start Session</button>}<button onClick={() => setIsLedgerVisible(true)} className="px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700">View Ledger</button></div></div></div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6"><div className="bento-box bg-blue-50 rounded-xl p-4 shadow-sm border"><h3 className="text-sm font-medium text-blue-800 mb-1">Total Products</h3><p className="text-2xl font-bold text-blue-900">{items.length}</p></div><div className="bento-box bg-green-50 rounded-xl p-4 shadow-sm border"><h3 className="text-sm font-medium text-green-800 mb-1">Total Stock</h3><p className="text-2xl font-bold text-green-900">{dashboardMetrics.totalStockValue}</p></div><div className="bento-box bg-purple-50 rounded-xl p-4 shadow-sm border"><h3 className="text-sm font-medium text-purple-800 mb-1">Available Packs</h3><p className="text-2xl font-bold text-purple-900">{dashboardMetrics.totalAvailablePacks}</p></div><div className={`bento-box rounded-xl p-4 shadow-sm border ${dashboardMetrics.lowStockItems > 0 ? 'bg-amber-50' : 'bg-emerald-50'}`}><h3 className="text-sm font-medium mb-1">{dashboardMetrics.lowStockItems > 0 ? 'Low Stock Items' : 'Stock Levels Good'}</h3><p className={`text-2xl font-bold ${dashboardMetrics.lowStockItems > 0 ? 'text-amber-800' : 'text-emerald-800'}`}>{dashboardMetrics.lowStockItems > 0 ? `${dashboardMetrics.lowStockItems} items` : 'All good'}</p></div></div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6"><div className="bg-white rounded-lg shadow-sm p-6"><h2 className="text-lg font-semibold mb-4">Add New Product</h2><div className="flex flex-col sm:flex-row gap-3"><input type="text" placeholder="Product name" value={newItemName} onChange={e=>setNewItemName(e.target.value)} className="flex-1 px-3 py-2 border rounded-md" /><input type="number" placeholder="Initial stock" value={newItemStock} onChange={e=>setNewItemStock(e.target.value)} className="w-full sm:w-32 px-3 py-2 border rounded-md" /><button onClick={()=>withLedger(addItem)()} disabled={!isSessionActive && !newItemName.trim()} className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-300">Add</button></div></div><div className="bg-white rounded-lg shadow-sm p-6"><h2 className="text-lg font-semibold mb-4">Search Inventory</h2><input type="search" placeholder="Search..." value={searchQuery} onChange={e=>setSearchQuery(e.target.value)} className="w-full px-3 py-2 border rounded-md"/></div></div>
+            <div className="bg-white rounded-lg shadow-sm p-6 mb-6"><h2 className="text-lg font-semibold mb-4">Add New Product</h2><div className="grid grid-cols-1 sm:grid-cols-3 gap-3"><input type="text" placeholder="Product name" value={newItemName} onChange={e=>setNewItemName(e.target.value)} className="sm:col-span-2 px-3 py-2 border rounded-md" /><input type="number" placeholder="Initial stock" value={newItemStock} onChange={e=>setNewItemStock(e.target.value)} className="px-3 py-2 border rounded-md" /></div><div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-3"><input type="url" placeholder="Image URL (optional)" value={newItemImageUrl} onChange={e=>setNewItemImageUrl(e.target.value)} className="sm:col-span-2 px-3 py-2 border rounded-md" /><button onClick={()=>withLedger(addItem)()} disabled={!isSessionActive && !newItemName.trim()} className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-300">Add Product</button></div></div>
+            <div className="bg-white rounded-lg shadow-sm p-4 mb-6"><input type="search" placeholder="Search products or packs..." value={searchQuery} onChange={e=>setSearchQuery(e.target.value)} className="w-full px-3 py-2 border rounded-md"/></div>
             
             <div className="mb-8">
               <div className="flex justify-between items-center mb-4"><h2 className="text-xl font-semibold">Packs ({filteredPacks.length})</h2><button onClick={()=>withLedger(()=>setShowPackForm(!showPackForm))()} className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700">{showPackForm ? 'Cancel' : 'Create New Pack'}</button></div>
@@ -357,7 +358,15 @@
 
             <div className="mb-6">
               <h2 className="text-xl font-semibold mb-4">Products ({filteredItems.length})</h2>
-              {filteredItems.length===0?<div className="bg-white rounded-lg shadow-sm p-6 text-center text-gray-500">No products found.</div>:<div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">{filteredItems.map(item=>(<div key={item.id} className="bg-white rounded-lg shadow-sm border p-4 card-transition flex flex-col justify-between"><div><div className="flex justify-between items-start">{editing.id===item.id?<input type="text" value={editing.text} onChange={e=>setEditing({...editing,text:e.target.value})} className="text-lg font-medium border-b-2 w-full" autoFocus onKeyDown={e=>e.key==='Enter'&&withLedger(updateItemName)(item.id,editing.text)}/>:<h3 className="text-lg font-medium">{item.name}</h3>}<span className={`flex-shrink-0 ml-2 text-xl font-bold ${item.stock<5?'text-amber-600':'text-gray-800'}`}>{item.stock}</span></div></div><div className="mt-4 flex flex-col space-y-2">{editing.id===item.id?<div className="flex gap-2"><button onClick={()=>withLedger(updateItemName)(item.id,editing.text)} className="w-full px-2 py-1 text-xs bg-blue-600 text-white rounded">Save</button><button onClick={()=>setEditing({id:null,text:''})} className="w-full px-2 py-1 text-xs bg-gray-200 rounded">Cancel</button></div>:<div className="grid grid-cols-5 gap-2 text-center"><button onClick={()=>withLedger(updateStock)(item.id,1)} className="p-1 text-xs bg-green-100 rounded">+1</button><button onClick={()=>withLedger(updateStock)(item.id,-1)} disabled={item.stock<=0} className="p-1 text-xs bg-red-100 rounded disabled:opacity-50">-1</button><button onClick={()=>setAdjustmentItemId(item.id===adjustmentItemId?null:item.id)} className="p-1 text-xs bg-blue-100 rounded">Adj</button><button onClick={()=>withLedger(()=>setEditing({id:item.id,text:item.name}))()} className="p-1 text-xs bg-yellow-100 rounded">Edit</button><button onClick={()=>withLedger(deleteItem)(item.id)} className="p-1 text-xs bg-gray-200 rounded">Del</button></div>}{adjustmentItemId===item.id&&<div className="flex items-center space-x-2"><input type="number" min="1" value={adjustmentValue} onChange={e=>setAdjustmentValue(e.target.value)} className="flex-1 p-1 text-xs border rounded"/><button onClick={()=>withLedger(updateStock)(item.id,Math.abs(parseInt(adjustmentValue))||0)} className="px-2 py-1 text-xs bg-green-600 text-white rounded">Add</button><button onClick={()=>withLedger(updateStock)(item.id,-Math.abs(parseInt(adjustmentValue))||0)} className="px-2 py-1 text-xs bg-red-600 text-white rounded">Sub</button></div>}</div></div>))}</div>}
+              {filteredItems.length===0?<div className="bg-white rounded-lg shadow-sm p-6 text-center text-gray-500">No products found.</div>:<div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">{filteredItems.map(item=>(<div key={item.id} className="bg-white rounded-lg shadow-sm border card-transition flex flex-col justify-between">
+                <ProductImage item={item} handleEditImage={handleEditImage} />
+                <div className="p-4 flex flex-col flex-grow justify-between">
+                  <div>
+                    <div className="flex justify-between items-start">{editing.id===item.id?<input type="text" value={editing.text} onChange={e=>setEditing({...editing,text:e.target.value})} className="text-lg font-medium border-b-2 w-full" autoFocus onKeyDown={e=>e.key==='Enter'&&withLedger(updateItem) (item.id, 'name', editing.text)}/>:<h3 className="text-lg font-medium">{item.name}</h3>}<span className={`flex-shrink-0 ml-2 text-xl font-bold ${item.stock<5?'text-amber-600':'text-gray-800'}`}>{item.stock}</span></div>
+                  </div>
+                  <div className="mt-4 flex flex-col space-y-2">{editing.id===item.id?<div className="flex gap-2"><button onClick={()=>withLedger(updateItem)(item.id, 'name', editing.text)} className="w-full px-2 py-1 text-xs bg-blue-600 text-white rounded">Save</button><button onClick={()=>setEditing({id:null,text:''})} className="w-full px-2 py-1 text-xs bg-gray-200 rounded">Cancel</button></div>:<div className="grid grid-cols-5 gap-2 text-center"><button onClick={()=>withLedger(updateStock)(item.id,1)} className="p-1 text-xs bg-green-100 rounded">+1</button><button onClick={()=>withLedger(updateStock)(item.id,-1)} disabled={item.stock<=0} className="p-1 text-xs bg-red-100 rounded disabled:opacity-50">-1</button><button onClick={()=>setAdjustmentItemId(item.id===adjustmentItemId?null:item.id)} className="p-1 text-xs bg-blue-100 rounded">Adj</button><button onClick={()=>withLedger(()=>setEditing({id:item.id,text:item.name}))()} className="p-1 text-xs bg-yellow-100 rounded">Edit</button><button onClick={()=>withLedger(deleteItem)(item.id)} className="p-1 text-xs bg-gray-200 rounded">Del</button></div>}{adjustmentItemId===item.id&&<div className="flex items-center space-x-2"><input type="number" min="1" value={adjustmentValue} onChange={e=>setAdjustmentValue(e.target.value)} className="flex-1 p-1 text-xs border rounded"/><button onClick={()=>withLedger(updateStock)(item.id,Math.abs(parseInt(adjustmentValue))||0)} className="px-2 py-1 text-xs bg-green-600 text-white rounded">Add</button><button onClick={()=>withLedger(updateStock)(item.id,-Math.abs(parseInt(adjustmentValue))||0)} className="px-2 py-1 text-xs bg-red-600 text-white rounded">Sub</button></div>}</div>
+                </div>
+              </div>))}</div>}
             </div>
           </div>
         </div>
@@ -379,5 +388,4 @@
   </script>
 </body>
 </html>
-
 
