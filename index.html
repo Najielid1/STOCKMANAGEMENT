@@ -50,7 +50,7 @@
             editImagePrompt: "Enter new image URL:",
             invoiceTitle: "Create Purchase Invoice", searchProductToAdd: "Search for a product to add...", finalizeInvoice: "Finalize Invoice",
             total: "Total:", pastInvoices: "Past Invoices", noInvoicesFound: "No invoices found.",
-            productDetails: "Product Details", averagePurchasePrice: "Average Purchase Price", attachPhotos: "Attach Photos"
+            productDetails: "Product Details", averagePurchasePrice: "Average Purchase Price", attachPhotos: "Attach Photos", finalizing: "Finalizing..."
         },
         fr: {
             inventoryAccess: "Accès à l'inventaire", enterPassword: "Entrez le mot de passe", login: "Connexion", incorrectPassword: "Mot de passe incorrect.",
@@ -69,7 +69,7 @@
             editImagePrompt: "Entrez la nouvelle URL de l'image:",
             invoiceTitle: "Créer une facture d'achat", searchProductToAdd: "Rechercher un produit à ajouter...", finalizeInvoice: "Finaliser la facture",
             total: "Total :", pastInvoices: "Factures passées", noInvoicesFound: "Aucune facture trouvée.",
-            productDetails: "Détails du produit", averagePurchasePrice: "Prix d'achat moyen", attachPhotos: "Joindre des photos"
+            productDetails: "Détails du produit", averagePurchasePrice: "Prix d'achat moyen", attachPhotos: "Joindre des photos", finalizing: "Finalisation..."
         },
         ar: {
             inventoryAccess: "الوصول إلى المخزون", enterPassword: "أدخل كلمة المرور", login: "تسجيل الدخول", incorrectPassword: "كلمة مرور غير صحيحة.",
@@ -88,7 +88,7 @@
             editImagePrompt: "أدخل رابط الصورة الجديد:",
             invoiceTitle: "إنشاء فاتورة شراء", searchProductToAdd: "ابحث عن منتج لإضافته...", finalizeInvoice: "إنهاء الفاتورة",
             total: "المجموع:", pastInvoices: "الفواتير السابقة", noInvoicesFound: "لم يتم العثور على فواتير.",
-            productDetails: "تفاصيل المنتج", averagePurchasePrice: "متوسط سعر الشراء", attachPhotos: "إرفاق صور"
+            productDetails: "تفاصيل المنتج", averagePurchasePrice: "متوسط سعر الشراء", attachPhotos: "إرفاق صور", finalizing: "جار الإنهاء..."
         }
     };
 
@@ -174,12 +174,11 @@
         );
     };
 
-    const InvoiceCreator = ({ items, onFinalize, onClose }) => {
+    const InvoiceCreator = ({ items, onFinalize, onClose, isUploading }) => {
         const { t } = useTranslation();
         const [lineItems, setLineItems] = useState([]);
         const [searchTerm, setSearchTerm] = useState('');
         const [imageFiles, setImageFiles] = useState([]);
-        const [isUploading, setIsUploading] = useState(false);
         const fileInputRef = useRef(null);
 
         const handleAddItem = (itemToAdd) => {
@@ -194,40 +193,16 @@
             if (!searchTerm) return [];
             return items.filter(item => !lineItems.some(li => li.id === item.id) && item.name.toLowerCase().includes(searchTerm.toLowerCase()));
         }, [searchTerm, items, lineItems]);
-
-        const handleFileChange = (e) => {
-            setImageFiles(prev => [...prev, ...Array.from(e.target.files)]);
-        };
-
-        const handleRemoveImage = (index) => {
-            setImageFiles(prev => prev.filter((_, i) => i !== index));
-        };
-
-        const handleFinalize = async () => {
-            setIsUploading(true);
-            const invoiceData = { createdAt: firebase.firestore.FieldValue.serverTimestamp(), lineItems: lineItems.map(({ id, name, quantity, cost }) => ({ id, name, quantity, cost })), grandTotal, photoUrls: [], photoPaths: [] };
-            
-            if (imageFiles.length > 0) {
-                const invoiceId = db.collection('invoices').doc().id;
-                const uploadPromises = imageFiles.map(file => {
-                    const filePath = `invoices/${invoiceId}/${file.name}`;
-                    return storage.ref(filePath).put(file).then(snapshot => snapshot.ref.getDownloadURL().then(url => ({url, path: filePath})));
-                });
-                try {
-                    const results = await Promise.all(uploadPromises);
-                    invoiceData.photoUrls = results.map(r => r.url);
-                    invoiceData.photoPaths = results.map(r => r.path);
-                } catch (error) {
-                    console.error("Image upload failed: ", error);
-                    setIsUploading(false);
-                    return;
-                }
-            }
-            
+        const handleFileChange = (e) => setImageFiles(prev => [...prev, ...Array.from(e.target.files)]);
+        const handleRemoveImage = (index) => setImageFiles(prev => prev.filter((_, i) => i !== index));
+        const handleFinalize = () => {
+            const invoiceData = {
+                lineItems: lineItems.map(({ id, name, quantity, cost }) => ({ id, name, quantity, cost })),
+                grandTotal,
+                imageFiles
+            };
             onFinalize(invoiceData);
-            setIsUploading(false);
         };
-        
         return (
             <div className="modal-backdrop">
                 <div className="modal-content bg-white rounded-lg shadow-xl w-11/12 max-w-4xl h-5/6 flex flex-col" onClick={e => e.stopPropagation()}>
@@ -249,13 +224,13 @@
                             <input type="file" multiple accept="image/*" ref={fileInputRef} onChange={handleFileChange} className="hidden" />
                             <button onClick={() => fileInputRef.current.click()} className="w-full p-2 border-2 border-dashed rounded-md text-gray-500 hover:bg-gray-100">{t('attachPhotos')}</button>
                             <div className="mt-2 flex flex-wrap gap-2">{imageFiles.map((file, index) => (
-                                <div key={index} className="relative w-20 h-20"><img src={URL.createObjectURL(file)} className="w-full h-full object-cover rounded-md" /><button onClick={() => handleRemoveImage(index)} className="absolute top-0 right-0 bg-red-500 text-white rounded-full p-0.5 text-xs">✕</button></div>
+                                <div key={index} className="relative w-20 h-20"><img src={URL.createObjectURL(file)} className="w-full h-full object-cover rounded-md" /><button onClick={() => handleRemoveImage(index)} className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full p-0.5 w-5 h-5 text-xs flex items-center justify-center">✕</button></div>
                             ))}</div>
                         </div>
                     </div>
                     <div className="p-4 border-t flex justify-between items-center">
                         <span className="text-xl font-bold">{t('total')} {grandTotal.toFixed(2)} DH</span>
-                        <div className="flex gap-2"><button onClick={onClose} className="px-4 py-2 bg-gray-200 rounded-md">{t('cancel')}</button><button onClick={handleFinalize} disabled={lineItems.length === 0 || isUploading} className="px-4 py-2 bg-green-600 text-white rounded-md disabled:bg-gray-300">{isUploading ? 'Uploading...' : t('finalizeInvoice')}</button></div>
+                        <div className="flex gap-2"><button onClick={onClose} className="px-4 py-2 bg-gray-200 rounded-md">{t('cancel')}</button><button onClick={handleFinalize} disabled={lineItems.length === 0 || isUploading} className="px-4 py-2 bg-green-600 text-white rounded-md disabled:bg-gray-300">{isUploading ? t('finalizing') : t('finalizeInvoice')}</button></div>
                     </div>
                 </div>
             </div>
@@ -318,6 +293,7 @@
       const [showPackForm, setShowPackForm] = useState(false); const [newPackName, setNewPackName] = useState(''); const [packComponents, setPackComponents] = useState([]);
       const [adjustmentItemId, setAdjustmentItemId] = useState(null); const [adjustmentPackId, setAdjustmentPackId] = useState(null); const [adjustmentValue, setAdjustmentValue] = useState('');
       const [isSessionActive, setIsSessionActive] = useState(false); const [sessionChanges, setSessionChanges] = useState([]); const [sessionNote, setSessionNote] = useState(""); const [sessionSnapshot, setSessionSnapshot] = useState(null);
+      const [isUploading, setIsUploading] = useState(false);
 
       useEffect(() => {
         const unsubItems = db.collection('items').orderBy("createdAt", "desc").onSnapshot(s => setItems(s.docs.map(d => ({ id: d.id, ...d.data() }))), e => setError(`Items Error: ${e.message}`));
@@ -415,25 +391,53 @@
       };
       
       const handleFinalizeInvoice = async (invoiceData, isCapturing) => {
-          const counterRef = db.collection('counters').doc('invoiceCounter');
-          let newInvoiceNumber;
-          await db.runTransaction(async (transaction) => {
-              const counterDoc = await transaction.get(counterRef);
-              newInvoiceNumber = (counterDoc.exists ? counterDoc.data().currentNumber : 0) + 1;
-              transaction.set(counterRef, { currentNumber: newInvoiceNumber }, { merge: true });
-          });
-          const formattedInvoiceNumber = `INV-${String(newInvoiceNumber).padStart(3, '0')}`;
-          const finalInvoiceData = { ...invoiceData, invoiceNumber: formattedInvoiceNumber };
-          const batch = db.batch();
-          finalInvoiceData.lineItems.forEach(item => {
-              const itemRef = db.collection('items').doc(item.id);
-              batch.update(itemRef, { stock: firebase.firestore.FieldValue.increment(item.quantity) });
-          });
-          const invoiceRef = db.collection('invoices').doc();
-          batch.set(invoiceRef, finalInvoiceData);
-          await batch.commit();
-          setIsInvoiceCreatorVisible(false);
-          if(isCapturing) return {type: 'CREATE_INVOICE', name: `Invoice ${formattedInvoiceNumber}`, targetId: invoiceRef.id, details: `Received ${finalInvoiceData.lineItems.length} items. Total: ${finalInvoiceData.grandTotal.toFixed(2)} DH`, photoPaths: finalInvoiceData.photoPaths};
+          setIsUploading(true);
+          try {
+              const counterRef = db.collection('counters').doc('invoiceCounter');
+              let newInvoiceNumber;
+              await db.runTransaction(async (transaction) => {
+                  const counterDoc = await transaction.get(counterRef);
+                  newInvoiceNumber = (counterDoc.exists ? counterDoc.data().currentNumber : 0) + 1;
+                  transaction.set(counterRef, { currentNumber: newInvoiceNumber }, { merge: true });
+              });
+              const formattedInvoiceNumber = `INV-${String(newInvoiceNumber).padStart(3, '0')}`;
+              
+              const invoiceRef = db.collection('invoices').doc();
+
+              const finalInvoiceData = { 
+                  createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+                  lineItems: invoiceData.lineItems,
+                  grandTotal: invoiceData.grandTotal,
+                  invoiceNumber: formattedInvoiceNumber,
+                  photoUrls: [], 
+                  photoPaths: [] 
+              };
+
+              if (invoiceData.imageFiles && invoiceData.imageFiles.length > 0) {
+                  const uploadPromises = invoiceData.imageFiles.map(file => {
+                      const filePath = `invoices/${invoiceRef.id}/${file.name}`;
+                      return storage.ref(filePath).put(file).then(snapshot => snapshot.ref.getDownloadURL().then(url => ({url, path: filePath})));
+                  });
+                  const results = await Promise.all(uploadPromises);
+                  finalInvoiceData.photoUrls = results.map(r => r.url);
+                  finalInvoiceData.photoPaths = results.map(r => r.path);
+              }
+              
+              const batch = db.batch();
+              finalInvoiceData.lineItems.forEach(item => {
+                  const itemRef = db.collection('items').doc(item.id);
+                  batch.update(itemRef, { stock: firebase.firestore.FieldValue.increment(item.quantity) });
+              });
+              batch.set(invoiceRef, finalInvoiceData);
+              await batch.commit();
+
+              setIsInvoiceCreatorVisible(false);
+              if(isCapturing) return {type: 'CREATE_INVOICE', name: `Invoice ${formattedInvoiceNumber}`, targetId: invoiceRef.id, details: `Received ${finalInvoiceData.lineItems.length} items. Total: ${finalInvoiceData.grandTotal.toFixed(2)} DH`, photoPaths: finalInvoiceData.photoPaths};
+          } catch(e) {
+              setError("Failed to finalize invoice: " + e.message);
+          } finally {
+              setIsUploading(false);
+          }
       };
 
       const handleStartSession = () => {
@@ -499,7 +503,7 @@
           {isLedgerVisible && <div className="modal-backdrop" onClick={() => setIsLedgerVisible(false)}><div className="modal-content bg-white rounded-lg shadow-xl w-11/12 max-w-4xl h-3/4 flex flex-col" onClick={e => e.stopPropagation()}><div className="p-4 border-b"><h2 className="text-xl font-bold">{t('operationsLedger')}</h2></div><div className="p-4 flex-grow overflow-y-auto bg-gray-50">{ledger.length === 0 ? <p>{t('noLedgerEntries')}</p> : <ul className="space-y-4">{ledger.map(entry => (<li key={entry.id} className="bg-white p-4 rounded-lg shadow"><div className="flex justify-between items-center mb-2"><p className="font-bold text-lg">{entry.note}</p><p className="text-sm text-gray-500">{entry.sessionEndedAt ? new Date(entry.sessionEndedAt.toDate()).toLocaleString() : ''}</p></div><ul className="space-y-1 pl-4 border-l-2">{entry.changes.map((change, index) => (<li key={index} className="text-sm text-gray-700"><span className="font-semibold">{change.name}</span>: {change.details}</li>))}</ul></li>))}</ul>}</div><div className="p-4 border-t text-right"><button onClick={() => setIsLedgerVisible(false)} className="px-4 py-2 bg-gray-200 rounded-md">{t('close')}</button></div></div></div>}
           {isSaveSessionModalVisible && <div className="modal-backdrop"><div className="modal-content bg-white rounded-lg shadow-xl w-11/12 max-w-lg"><div className="p-6"><h2 className="text-xl font-bold mb-4">{t('endSessionTitle')}</h2><p className="mb-4">{sessionChanges.length} {t('changesRecorded')}. {t('endSessionNote')}</p><textarea value={sessionNote} onChange={e => setSessionNote(e.target.value)} placeholder="e.g., Weekly stock intake..." className="w-full p-2 border rounded-md" rows="3"></textarea></div><div className="px-6 py-4 bg-gray-50 flex justify-between"><button onClick={handleDiscardSession} className="px-4 py-2 bg-red-100 text-red-700 rounded-md">{t('discardAndRevert')}</button><div className="flex gap-3"><button onClick={() => setIsSaveSessionModalVisible(false)} className="px-4 py-2 bg-gray-200 rounded-md">{t('cancel')}</button><button onClick={handleSaveSession} className="px-4 py-2 bg-blue-600 text-white rounded-md">{t('saveToLedger')}</button></div></div></div></div>}
           {showStartSessionPrompt && <div className="modal-backdrop"><div className="modal-content bg-white rounded-lg shadow-xl w-11/12 max-w-sm text-center p-6"><h2 className="text-xl font-bold mb-4">{t('sessionRequired')}</h2><p className="mb-6">{t('pleaseStartSession')}</p><div className="flex gap-4"><button onClick={() => setShowStartSessionPrompt(false)} className="w-full px-4 py-2 bg-gray-200 rounded-md">{t('cancel')}</button><button onClick={() => { handleStartSession(); setShowStartSessionPrompt(false); }} className="w-full px-4 py-2 bg-blue-600 text-white rounded-md">{t('startSession')}</button></div></div></div>}
-          {isInvoiceCreatorVisible && <InvoiceCreator items={items} onFinalize={withLedger(handleFinalizeInvoice)} onClose={() => setIsInvoiceCreatorVisible(false)} />}
+          {isInvoiceCreatorVisible && <InvoiceCreator items={items} onFinalize={withLedger(handleFinalizeInvoice)} onClose={() => setIsInvoiceCreatorVisible(false)} isUploading={isUploading} />}
           {isInvoiceViewerVisible && <InvoiceViewer invoices={invoices} onClose={() => setIsInvoiceViewerVisible(false)} />}
           {detailedItem && <ProductDetailModal item={detailedItem} onClose={() => setDetailedItemId(null)} />}
           
